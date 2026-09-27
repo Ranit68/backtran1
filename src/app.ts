@@ -15,6 +15,7 @@ import { ferryRoutes } from "./routes/ferry.routes.js";
 import { journeyRoutes } from "./routes/journey.routes.js";
 import { adminRoutes } from "./routes/admin.routes.js";
 import { getGraphStatus } from "./services/graph.service.js";
+import { sendFrontend } from "./frontend.js";
 
 /**
  * Fastify application factory.
@@ -58,15 +59,22 @@ export async function buildApp(): Promise<FastifyInstance> {
   // -------------------------------------------------------------------------
   // Not found
   // -------------------------------------------------------------------------
-  app.setNotFoundHandler((request, reply) =>
-    sendFail(
+  app.setNotFoundHandler((request, reply) => {
+    // Anything that is not an API call gets the single-page frontend, so a deep
+    // link such as /plan loads the app instead of a JSON 404. API paths keep
+    // the JSON 404, because a client calling a missing endpoint needs to be told
+    // so in the shape it is already parsing.
+    if (request.method === "GET" && !request.url.startsWith("/api")) {
+      if (sendFrontend(reply)) return reply;
+    }
+    return sendFail(
       reply,
       ErrorCode.NOT_FOUND,
       `No route matches ${request.method} ${request.url}.`,
       404,
-      { hint: "Every endpoint is listed in README.md and at GET /." },
-    ),
-  );
+      { hint: "Every endpoint is listed in README.md and at GET /api." },
+    );
+  });
 
   // -------------------------------------------------------------------------
   // Central error handler -- one place decides the response shape (spec 23).
@@ -121,8 +129,9 @@ export async function buildApp(): Promise<FastifyInstance> {
     { prefix: "/api" },
   );
 
-  // Lightweight service index, handy for verifying a deployment by hand.
-  app.get("/", async (_request, reply) =>
+  // The frontend is served for every non-API path, including "/". The service
+  // index therefore lives under the API prefix, where it cannot shadow the site.
+  app.get("/api", async (_request, reply) =>
     sendOk(reply, {
       service: "kolkata-transport-backend",
       documentation: "See README.md for the full endpoint list.",

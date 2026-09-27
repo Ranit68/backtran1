@@ -3,12 +3,17 @@
   "functions": {
     "api/index.ts": {
       "memory": 1024,
-      "maxDuration": 30
+      "maxDuration": 30,
+      "includeFiles": ["public/**"]
     }
   },
   "rewrites": [
     {
       "source": "/api/:path*",
+      "destination": "/api/index.ts"
+    },
+    {
+      "source": "/:path*",
       "destination": "/api/index.ts"
     }
   ]

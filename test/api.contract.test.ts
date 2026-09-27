@@ -191,9 +191,30 @@ describe("admin routes", () => {
 });
 
 describe("service index", () => {
-  it("lists the endpoints at the root for a quick manual check", async () => {
-    const response = await app.inject({ method: "GET", url: "/" });
+  it("lists the endpoints under /api for a quick manual check", async () => {
+    const response = await app.inject({ method: "GET", url: "/api" });
     expect(response.statusCode).toBe(200);
     expect(response.json().data.endpoints.journey).toBe("POST /api/journey");
+  });
+});
+
+describe("frontend", () => {
+  it("serves the single-page app at the root", async () => {
+    const response = await app.inject({ method: "GET", url: "/" });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("text/html");
+    expect(response.body).toContain("<!doctype html>");
+  });
+
+  it("serves the app for a deep link so client routing works on reload", async () => {
+    const response = await app.inject({ method: "GET", url: "/plan" });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain("<!doctype html>");
+  });
+
+  it("does not let the frontend shadow a missing API endpoint", async () => {
+    const response = await app.inject({ method: "GET", url: "/api/does-not-exist" });
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe("NOT_FOUND");
   });
 });

@@ -198,7 +198,11 @@ Errors always use the same shape, including 404s, malformed JSON, and rate-limit
 
 ## Endpoints
 
-All routes are under `/api`. `GET /` returns a machine-readable index of them.
+All routes are under `/api`. `GET /api` returns a machine-readable index of them.
+
+`GET /` returns the web frontend, not JSON. Every non-`/api` GET path is served
+`public/index.html`, so deep links survive a reload; a missing `/api` path still
+returns a JSON 404, so a broken client call is never mistaken for a page.
 
 ### Health
 

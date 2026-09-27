@@ -27,6 +27,31 @@ function getApp(): Promise<FastifyInstance> {
 }
 
 export default async function handler(request: IncomingMessage, response: ServerResponse): Promise<void> {
-  const app = await getApp();
-  app.server.emit("request", request, response);
+  try {
+    const app = await getApp();
+    app.server.emit("request", request, response);
+  } catch (error) {
+    // Without this the runtime discards the failure and returns an empty 500,
+    // which says nothing about the cause. Logging puts it in the function logs
+    // and the body makes it visible to whoever is holding the request.
+    console.error("request failed before a response was produced", {
+      url: request.url,
+      method: request.method,
+      err: error instanceof Error ? { message: error.message, stack: error.stack } : error,
+    });
+    if (!response.headersSent) {
+      response.statusCode = 500;
+      response.setHeader("content-type", "application/json; charset=utf-8");
+    }
+    response.end(
+      JSON.stringify({
+        success: false,
+        error: {
+          code: "INTERNAL_ERROR",
+          statusCode: 500,
+          message: error instanceof Error ? error.message : "Unhandled server error",
+        },
+      }),
+    );
+  }
 }
