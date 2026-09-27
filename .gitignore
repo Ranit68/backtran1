@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Secrets. .env.example is committed; .env never is.
+.env
+.env.*
+!.env.example
+
+# Source data. The CSVs stay out of the repository: they are supplied
+# separately and are large enough to bloat a clone. Set DATA_DIR instead.
+data/
+*.csv
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local verification artifacts (.smoke/*.json)
+.smoke/
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
