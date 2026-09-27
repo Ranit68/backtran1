@@ -10,7 +10,7 @@ export interface Coordinates {
 /**
  * Great-circle distance in meters between two WGS84 points.
  *
- * Used only when real coordinates exist. The bus and tram source data has no
+ * Used only when real coordinates exist. The bus and metro source data has no
  * coordinates, so in practice this currently serves nothing -- it is here so
  * that Metro (which does have coordinates) can be plugged in without touching
  * TransferService.

@@ -10,7 +10,7 @@ import {
 describe("normalizeStopName", () => {
   it("treats a trailing parenthetical as the same place", () => {
     // "Esplanade (Metro)" and "Esplanade" are the same interchange. Stripping the
-    // qualifier is what lets a bus stop and a tram stop at Esplanade be linked
+    // qualifier is what lets a bus stop and a metro stop at Esplanade be linked
     // when no coordinates exist yet.
     const canonical = normalizeStopName("Esplanade");
     expect(normalizeStopName("esplanade")).toBe(canonical);

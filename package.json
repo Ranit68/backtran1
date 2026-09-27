@@ -2,7 +2,7 @@
   "name": "transport-backend",
   "version": "1.0.0",
   "private": true,
-  "description": "Kolkata Multi-Modal Transport Platform - Backend REST API (Bus + Tram, Metro/Ferry adapters reserved)",
+  "description": "Kolkata Multi-Modal Transport Platform - Backend REST API (Bus + Metro; Ferry adapter reserved, Tram retired)",
   "type": "module",
   "engines": {
     "node": ">=20.11.0"
@@ -13,10 +13,11 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:test": "tsc -p tsconfig.test.json",
+    "verify": "npm run typecheck && npm run typecheck:test && npm test && npm run build",
     "migrate": "tsx src/db/migrate.ts",
     "import:bus-routes": "tsx src/scripts/import-bus-routes.ts",
     "import:bus-timetable": "tsx src/scripts/import-bus-timetable.ts",
-    "import:tram-routes": "tsx src/scripts/import-tram-routes.ts",
     "import:all": "tsx src/scripts/import-all.ts",
     "test": "vitest run",
     "test:watch": "vitest"

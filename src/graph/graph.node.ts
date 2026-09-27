@@ -13,7 +13,7 @@ import { buildStopNodeId, normalizeStopName } from "../utils/normalize.js";
 /**
  * Source rows containing one of these phrases are placeholders from the data
  * collection process, not real places -- for example the literal stop name
- * "(no stop data captured)" appears in both the bus and the tram source files.
+ * "(no stop data captured)" appears in the bus source file.
  *
  * They are still stored in the database unchanged (the specification requires
  * preserving source data) but they are excluded from the graph, from search and

@@ -12,7 +12,7 @@ import { env } from "../config/env.js";
  * transfer candidates. Do not connect every similarly named stop
  * automatically."
  *
- * The current data set (bus + tram route stops) contains NO coordinates, so
+ * The current data set (bus route stops + metro stations) contains NO coordinates, so
  * distance-based detection cannot run yet and the service falls back to name
  * matching. That fallback is deliberately strict: an exact normalised-name
  * match, or a similarity at or above the configured threshold across DIFFERENT

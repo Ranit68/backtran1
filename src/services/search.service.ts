@@ -3,9 +3,14 @@ import {
   searchBusStops,
   type BusDistinctStop,
 } from "../repositories/bus.repository.js";
-import { getTramDistinctStops, searchTramStops, type TramDistinctStop } from "../repositories/tram.repository.js";
+import {
+  getMetroDistinctStations,
+  searchMetroStations,
+  METRO_OPERATOR,
+  type MetroStationAggregate,
+} from "../repositories/metro.repository.js";
 import { type TransportMode } from "../types/transport.js";
-import { scoreSearchMatch, normalizeStopName } from "../utils/normalize.js";
+import { scoreSearchMatch, normalizeStopName, buildStopNodeId } from "../utils/normalize.js";
 import { requireDatabase } from "../repositories/base.repository.js";
 import { isPlaceholderStop } from "../graph/graph.node.js";
 
@@ -32,7 +37,7 @@ export interface SearchResult {
   mode: TransportMode;
   /**
    * Every mode that serves this place. Usually just `mode`, but a stop shared
-   * by bus and tram is reported once with both, which is the signal a transfer
+   * by bus and metro is reported once with both, which is the signal a transfer
    * is possible there.
    */
   modes: TransportMode[];
@@ -74,27 +79,27 @@ export class SearchService {
     type Candidate = { name: string; operator: string; routeCount: number; mode: TransportMode };
 
     const wantsBus = mode === "ALL" || mode === "BUS";
-    const wantsTram = mode === "ALL" || mode === "TRAM";
+    const wantsMetro = mode === "ALL" || mode === "METRO";
 
     const busCandidates: Candidate[] = [];
-    const tramCandidates: Candidate[] = [];
+    const metroCandidates: Candidate[] = [];
 
     if (wantsBus) {
       const rows = await searchBusStops(q, Math.max(limit * 4, 50));
-      busCandidates.push(...rows.map((row) => this.toCandidate(row, "BUS")));
+      busCandidates.push(...rows.map((row) => this.toBusCandidate(row)));
       if (rows.length === 0) {
         busCandidates.push(
-          ...(await getBusDistinctStops()).map((row) => this.toCandidate(row, "BUS")),
+          ...(await getBusDistinctStops()).map((row) => this.toBusCandidate(row)),
         );
       }
     }
 
-    if (wantsTram) {
-      const rows = await searchTramStops(q, Math.max(limit * 4, 50));
-      tramCandidates.push(...rows.map((row) => this.toCandidate(row, "TRAM")));
+    if (wantsMetro) {
+      const rows = await searchMetroStations(q, Math.max(limit * 4, 50));
+      metroCandidates.push(...rows.map((row) => this.toMetroCandidate(row)));
       if (rows.length === 0) {
-        tramCandidates.push(
-          ...(await getTramDistinctStops()).map((row) => this.toCandidate(row, "TRAM")),
+        metroCandidates.push(
+          ...(await getMetroDistinctStations()).map((row) => this.toMetroCandidate(row)),
         );
       }
     }
@@ -102,14 +107,14 @@ export class SearchService {
     const scored: SearchResult[] = [];
     const seen = new Set<string>();
 
-    for (const candidate of [...busCandidates, ...tramCandidates]) {
+    for (const candidate of [...busCandidates, ...metroCandidates]) {
       if (isPlaceholderStop(candidate.name)) continue;
       const score = scoreSearchMatch(q, candidate.name);
       if (score === null || score < minScore) continue;
 
       const normalizedName = normalizeStopName(candidate.name);
-      // Collapse the same place listed under both bus and tram into one
-      // result, but keep every mode so the client can show both.
+      // Collapse the same place listed under more than one mode into one result,
+      // but keep every mode so the client can show where to change.
       const key = `${normalizedName}`;
       if (seen.has(key)) {
         const existing = scored.find((result) => result.normalizedName === key);
@@ -128,18 +133,38 @@ export class SearchService {
         routeCount: candidate.routeCount,
         score: Math.round(score * 1000) / 1000,
         normalizedName,
-        nodeId: `${candidate.mode.toLowerCase()}:${candidate.operator.toLowerCase()}:${normalizedName.replace(/\s+/g, "-")}`,
+        nodeId: buildStopNodeId(candidate.mode, candidate.operator, candidate.name),
       });
     }
 
     return scored.sort((a, b) => b.score - a.score || b.routeCount - a.routeCount).slice(0, limit);
   }
 
-  private toCandidate(
-    row: BusDistinctStop | TramDistinctStop,
-    mode: TransportMode,
-  ): { name: string; operator: string; routeCount: number; mode: TransportMode } {
-    return { name: row.stop_name, operator: row.operator, routeCount: row.route_count, mode };
+  private toBusCandidate(row: BusDistinctStop): {
+    name: string;
+    operator: string;
+    routeCount: number;
+    mode: TransportMode;
+  } {
+    return { name: row.stop_name, operator: row.operator, routeCount: row.route_count, mode: "BUS" };
+  }
+
+  /**
+   * A Metro "route count" is the number of lines calling at the station, so
+   * Esplanade scores as 3 (Blue, Green and Purple) rather than 1.
+   */
+  private toMetroCandidate(row: MetroStationAggregate): {
+    name: string;
+    operator: string;
+    routeCount: number;
+    mode: TransportMode;
+  } {
+    return {
+      name: row.station_name,
+      operator: METRO_OPERATOR,
+      routeCount: row.line_count,
+      mode: "METRO",
+    };
   }
 }
 

@@ -386,7 +386,14 @@ export async function countBusTimetableByRouteNos(
 // Route statistics
 // ---------------------------------------------------------------------------
 
-export async function getAllRouteTripStats(mode: "BUS" | "TRAM"): Promise<RouteTripStatsRow[]> {
+/**
+ * Precomputed per-route trip statistics.
+ *
+ * Only Bus uses this table. Metro measures per-hop times from its checkpoint
+ * table instead, because its trip durations come from short-turn services whose
+ * average says nothing about the time between two adjacent stations.
+ */
+export async function getAllRouteTripStats(mode: "BUS"): Promise<RouteTripStatsRow[]> {
   requireDatabase();
   return withDatabaseErrors(() =>
     query<RouteTripStatsRow>(

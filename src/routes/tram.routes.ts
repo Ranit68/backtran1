@@ -1,14 +1,18 @@
 import type { FastifyInstance } from "fastify";
-import { getTramRoute, getTramRouteStops, listTramRoutes, searchTram } from "../controllers/tram.controller.js";
+import { tramWithdrawn } from "../controllers/tram.controller.js";
 
-/** Tram endpoints -- specification section 15. */
+/**
+ * Retired Tram endpoints.
+ *
+ * Kept registered as a single wildcard so any lingering `/api/tram/*` call gets
+ * an explicit 410 with the reason, rather than a 404 that looks like a typo. The
+ * old per-route handlers are gone; nothing here reads the legacy Tram tables.
+ *
+ * `app.all` covers every method, including GET, so registering a separate GET
+ * wildcard as well would collide with it at startup.
+ */
 export async function tramRoutes(app: FastifyInstance): Promise<void> {
-  app.get("/tram/routes", listTramRoutes);
-  app.get("/tram/routes/:routeNo", getTramRoute);
-  app.get("/tram/routes/:routeNo/stops", getTramRouteStops);
-  app.get("/tram/search", searchTram);
-
-  // Query-parameter form, for route numbers that contain a slash.
-  app.get("/tram/routes/by-number", getTramRoute);
-  app.get("/tram/routes/by-number/stops", getTramRouteStops);
+  app.all("/tram/*", async () => {
+    throw tramWithdrawn();
+  });
 }

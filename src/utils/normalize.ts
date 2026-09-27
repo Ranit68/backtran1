@@ -8,7 +8,7 @@
  */
 
 /**
- * Words that carry no identity when comparing a bus stop against a tram stop
+ * Words that carry no identity when comparing a bus stop against a Metro station
  * against a metro station. Stripping these is what lets "Esplanade (Bus Stop)"
  * and "Esplanade Metro Station" collapse to the same key without us hardcoding
  * a list of interchanges.
@@ -74,7 +74,7 @@ export function normalizeStopName(input: string | null | undefined): string {
  * Normalises a route identifier for identity comparisons.
  *
  * Route numbers are identifiers, not numbers (spec section 19). `26/17` and
- * `26-17` are the same tram route written two ways, so separators collapse --
+ * `26-17` are the same route written two ways, so separators collapse --
  * but the digits and letters themselves are preserved exactly.
  */
 export function normalizeRouteNo(input: string | null | undefined): string {

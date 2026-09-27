@@ -38,7 +38,7 @@ function makeGraph(edges: GraphEdge[]): TransportGraph {
   for (const edge of edges) {
     for (const id of [edge.fromNodeId, edge.toNodeId]) {
       if (nodes.has(id)) continue;
-      const created = node(id, id.replace(/^bus:/, "").replace(/^tram:/, ""));
+      const created = node(id, id.replace(/^bus:/, "").replace(/^metro:/, ""));
       nodes.set(id, created);
       const key = normalizeStopName(created.name);
       byStopName.set(key, [...(byStopName.get(key) ?? []), created]);
@@ -54,7 +54,8 @@ function makeGraph(edges: GraphEdge[]): TransportGraph {
     transferEdgeCount: 0,
     routeCount: 1,
     busRouteCount: 1,
-    tramRouteCount: 0,
+    metroLineCount: 0,
+    metroLinesWithoutTimetable: [],
     nodesByMode: {},
     routesWithRealTimings: 0,
     routesOnStaticEstimate: 1,
@@ -66,6 +67,7 @@ function makeGraph(edges: GraphEdge[]): TransportGraph {
       distanceChecks: 0,
       rejectedByDistance: 0,
       rejectedBySimilarity: 0,
+      rejectedSameSystem: 0,
     },
     transferReasons: {},
     buildDurationMs: 0,
@@ -128,7 +130,7 @@ describe("findPath", () => {
   it("excludes a disallowed mode from the search", () => {
     const graph = makeGraph([
       rideEdge("bus:a", "bus:b", 5),
-      rideEdge("bus:b", "bus:c", 5, "TRAM"),
+      rideEdge("bus:b", "bus:c", 5, "METRO"),
     ]);
 
     const busOnly = findPath(graph, "bus:a", "bus:c", { modes: "BUS" });
@@ -141,11 +143,11 @@ describe("findPath", () => {
   it("counts a transfer edge as an interchange", () => {
     const graph = makeGraph([
       rideEdge("bus:a", "bus:h", 5),
-      transferEdge("bus:h", "tram:h", 5),
-      rideEdge("tram:h", "tram:z", 5, "TRAM"),
+      transferEdge("bus:h", "metro:h", 5),
+      rideEdge("metro:h", "metro:z", 5, "METRO"),
     ]);
 
-    const result = findPath(graph, "bus:a", "tram:z");
+    const result = findPath(graph, "bus:a", "metro:z");
     expect(result.found).toBe(true);
     expect(result.transfers).toBe(1);
   });
@@ -154,18 +156,18 @@ describe("findPath", () => {
     // One change but 40 min, versus no changes and 60 min.
     const edges = [
       rideEdge("bus:a", "bus:h", 5),
-      transferEdge("bus:h", "tram:h", 5),
-      rideEdge("tram:h", "tram:z", 30, "TRAM"),
+      transferEdge("bus:h", "metro:h", 5),
+      rideEdge("metro:h", "metro:z", 30, "METRO"),
       rideEdge("bus:a", "bus:m", 30),
       rideEdge("bus:m", "bus:n", 30),
     ];
     const graph = makeGraph(edges);
 
-    const fastest = findPath(graph, "bus:a", "tram:z", { strategy: "MIN_TIME" });
+    const fastest = findPath(graph, "bus:a", "metro:z", { strategy: "MIN_TIME" });
     expect(fastest.transfers).toBe(1);
 
-    const fewest = findPath(graph, "bus:a", "tram:z", { strategy: "MIN_INTERCHANGE" });
-    // The bus-only chain never reaches tram:z, so both searches must change.
+    const fewest = findPath(graph, "bus:a", "metro:z", { strategy: "MIN_INTERCHANGE" });
+    // The bus-only chain never reaches metro:z, so both searches must change.
     // What MIN_INTERCHANGE guarantees is the change is taken as early as
     // possible, i.e. the total time is not inflated by avoiding it.
     expect(fewest.found).toBe(true);

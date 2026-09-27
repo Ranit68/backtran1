@@ -23,11 +23,13 @@ export const ErrorCode = {
   // 409 / 422
   NO_ROUTE_FOUND: "NO_ROUTE_FOUND",
 
+  // 410 -- a mode that used to be served and has been withdrawn
+  TRAM_SERVICE_WITHDRAWN: "TRAM_SERVICE_WITHDRAWN",
+
   // 429
   RATE_LIMITED: "RATE_LIMITED",
 
   // 501 -- a mode the specification reserves but that has no data yet
-  METRO_NOT_CONFIGURED: "METRO_NOT_CONFIGURED",
   FERRY_NOT_CONFIGURED: "FERRY_NOT_CONFIGURED",
 
   // 503
@@ -52,8 +54,8 @@ const DEFAULT_STATUS: Record<ErrorCodeValue, number> = {
   STOP_NOT_FOUND: 404,
   TRIP_NOT_FOUND: 404,
   NO_ROUTE_FOUND: 422,
+  TRAM_SERVICE_WITHDRAWN: 410,
   RATE_LIMITED: 429,
-  METRO_NOT_CONFIGURED: 501,
   FERRY_NOT_CONFIGURED: 501,
   DATABASE_NOT_CONFIGURED: 503,
   DATABASE_UNAVAILABLE: 503,

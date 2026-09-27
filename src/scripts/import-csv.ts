@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+﻿import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
@@ -115,7 +115,7 @@ export interface ImportOptions {
  */
 async function findVanishedRoutes(
   pool: ReturnType<typeof getPool>,
-  table: "bus_route_stops" | "tram_route_stops",
+  table: "bus_route_stops",
   sourceRouteNos: string[],
 ): Promise<string[]> {
   if (sourceRouteNos.length === 0) return [];
@@ -364,132 +364,6 @@ export async function importBusTimetable(
 }
 
 // ---------------------------------------------------------------------------
-// wbtc_tram_routes.csv -> tram_route_stops
-// ---------------------------------------------------------------------------
-
-export async function importTramRoutes(
-  fileName = "wbtc_tram_routes.csv",
-  operator = env.DEFAULT_ROUTE_STOP_OPERATOR,
-  options: ImportOptions = {},
-): Promise<ImportResult> {
-  const { replace = true } = options;
-  const rows = await readCsv(fileName);
-  const rejections: Rejection[] = [];
-  const notes: string[] = [];
-
-  // The real file carries a leading `id` column that the specification's column
-  // list omits. It is a source-file artifact, not transport data, so it is
-  // detected and dropped rather than silently absorbed into a data column.
-  if (rows.length > 0 && "id" in rows[0]!) {
-    notes.push(
-      "source file has an extra leading 'id' column that is not in the specification; it was ignored and not stored",
-    );
-  }
-
-  const values: unknown[][] = [];
-  const seenKeys = new Set<string>();
-  const seenNames = new Set<string>();
-  let nullSequences = 0;
-
-  rows.forEach((row, index) => {
-    const rowNumber = index + 2;
-
-    // Spec section 18: tram requires route_no and stop_name; the sequence MAY
-    // be NULL.
-    const routeNo = trimmed(row.route_no);
-    if (routeNo.length === 0) {
-      rejections.push({ row: rowNumber, reason: "route_no is required", value: row.route_no });
-      return;
-    }
-    const stopName = trimmed(row.stop_name);
-    if (stopName.length === 0) {
-      rejections.push({ row: rowNumber, reason: "stop_name is required", value: row.stop_name });
-      return;
-    }
-
-    // Empty sequence -> SQL NULL, explicitly never 0 (spec section 7/18).
-    let sequence: number | null = null;
-    if (trimmed(row.stop_sequence_no).length > 0) {
-      sequence = parsePositiveInt(row.stop_sequence_no);
-      if (sequence === null) {
-        rejections.push({
-          row: rowNumber,
-          reason: "stop_sequence_no present but not an integer greater than 0",
-          value: row.stop_sequence_no,
-        });
-        return;
-      }
-    } else {
-      nullSequences += 1;
-    }
-
-    if (sequence !== null) {
-      const key = `${operator}|${routeNo}|${sequence}`;
-      if (seenKeys.has(key)) {
-        rejections.push({
-          row: rowNumber,
-          reason: `duplicate (operator, route_no, stop_sequence_no) = (${operator}, ${routeNo}, ${sequence})`,
-        });
-        return;
-      }
-      seenKeys.add(key);
-    }
-
-    // A route that repeats the same stop name at the same sequence would make
-    // the graph ambiguous. Checked on (route, stop) rather than (route, seq)
-    // because unsequenced rows have no sequence to compare.
-    const nameKey = `${routeNo}|${stopName.toLowerCase()}`;
-    if (seenNames.has(nameKey)) {
-      rejections.push({
-        row: rowNumber,
-        reason: `stop "${stopName}" appears more than once on tram route ${routeNo}`,
-      });
-      return;
-    }
-    seenNames.add(nameKey);
-
-    values.push([operator, nullable(row.vehicle_type) ?? "tram", routeNo, nullable(row.depot), sequence, stopName]);
-  });
-
-  if (nullSequences > 0) {
-    notes.push(`${nullSequences} row(s) had an empty stop_sequence_no and were stored as SQL NULL (never 0)`);
-  }
-  notes.push("tram has no timetable source file, so tram journeys use static estimated travel times");
-
-  if (replace) {
-    await truncateTables(["tram_route_stops"]);
-    notes.push("replaced existing tram_route_stops rows (replace mode)");
-  }
-
-  await insertBatch(
-    "tram_route_stops",
-    ["operator", "vehicle_type", "route_no", "depot", "stop_sequence_no", "stop_name"],
-    values,
-  );
-
-  const sourceRouteNos = [...new Set(rows.map((row) => trimmed(row.route_no)).filter((no) => no.length > 0))];
-  const vanished = await findVanishedRoutes(getPool(), "tram_route_stops", sourceRouteNos);
-  if (vanished.length > 0) {
-    notes.push(
-      `WARNING: ${vanished.length} route number(s) in the source have no usable row and will NOT appear in the API: ` +
-        `${vanished.join(", ")} (every one of their rows was rejected)`,
-    );
-  }
-
-  return {
-    sourceFile: fileName,
-    targetTable: "tram_route_stops",
-    mode: "TRAM",
-    operator,
-    rowsRead: rows.length,
-    rowsInserted: values.length,
-    rowsRejected: rejections.length,
-    rejections,
-    notes,
-  };
-}
-
-// ---------------------------------------------------------------------------
 // Route statistics derived from real timetable rows
 // ---------------------------------------------------------------------------
 
@@ -502,7 +376,7 @@ export async function importTramRoutes(
  * route with no complete time pair simply gets no stats and later falls back to
  * a configured speed estimate, which is explicitly allowed by spec section 22.
  */
-export async function recomputeRouteTripStats(mode: "BUS" | "TRAM"): Promise<string[]> {
+export async function recomputeRouteTripStats(mode: "BUS"): Promise<string[]> {
   if (mode !== "BUS") return [];
 
   const { rows } = await getPool().query<{

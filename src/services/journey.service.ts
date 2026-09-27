@@ -4,6 +4,10 @@ import { findBestPathAcross, type PathResult, type PathStep } from "../graph/pat
 import { edgeTimeMinutes, isRideEdge, isTransferEdge, type RideEdge } from "../graph/graph.edge.js";
 import { getGraph } from "./graph.service.js";
 import { getTimetableForRouteNos, resolveTimetableRouteNos } from "../repositories/bus.repository.js";
+import {
+  getMetroRunsBetweenStations,
+  type MetroLegRun,
+} from "../repositories/metro.repository.js";
 import type { BusTimetableRow } from "../models/bus.model.js";
 import type {
   JourneyModeFilter,
@@ -38,9 +42,13 @@ import {
  *  - The bus timetable records only a trip's overall departure and arrival, not
  *    a time at each stop, so a mid-route segment's clock time is SCALED across
  *    the trip. Every such segment is labelled `timingConfidence: "SCALED"`.
+ *  - Metro checkpoints do record a time per station, so a Metro leg gets the
+ *    real printed boarding departure, and a real printed arrival when the
+ *    passenger alights at the run's terminus. Anything else is interpolated
+ *    along the run's real duration and labelled `SCALED`.
  *  - Nothing is invented: `totalDistanceKm` is omitted entirely unless real
- *    coordinates exist, and tram legs are always `ESTIMATED` because no tram
- *    timetable source was supplied.
+ *    coordinates exist. A line with no timetable at all, such as the map-only
+ *    Pink line, is always `ESTIMATED`.
  */
 
 export interface JourneyOptions {
@@ -50,11 +58,21 @@ export interface JourneyOptions {
   timetableAware?: boolean;
 }
 
-interface TimetableIndex {
+export interface TimetableIndex {
   /** routeNo (as resolved) -> trips. */
   byRouteNo: Map<string, BusTimetableRow[]>;
   /** Routes that were asked about but have no timetable rows at all. */
   unresolvedRoutes: string[];
+  /**
+   * `line|from|to` -> real runs serving that leg in that direction.
+   *
+   * Keyed on the two station names rather than the line alone, because a run
+   * only qualifies when it passes both stations in the order the passenger is
+   * travelling, so the useful set depends on the exact boarding pair.
+   */
+  metroByLeg: Map<string, MetroLegRun[]>;
+  /** Lines the journey uses that have no timetable rows at all (e.g. Pink). */
+  metroLinesWithoutTimetable: string[];
 }
 
 export class JourneyService {
@@ -143,7 +161,7 @@ export class JourneyService {
 
     const timetable = timetableAware
       ? await this.loadTimetableIndex(best.result, graph)
-      : { byRouteNo: new Map(), unresolvedRoutes: [] };
+      : { byRouteNo: new Map(), unresolvedRoutes: [], metroByLeg: new Map(), metroLinesWithoutTimetable: [] };
 
     const { segments, clockMinutes } = this.buildSegments(graph, best.result, {
       timetable,
@@ -171,8 +189,8 @@ export class JourneyService {
     const totalDistanceKm = computeTotalDistanceKm(segments);
     if (totalDistanceKm === null) {
       warnings.push(
-        "totalDistanceKm is omitted because the bus and tram source data contains no stop coordinates. " +
-          "It will be reported once a coordinate source (for example Metro stops) is added.",
+        "totalDistanceKm is omitted because the bus and metro source data contains no stop coordinates. " +
+          "It will be reported once a coordinate source is added.",
       );
     }
 
@@ -206,53 +224,92 @@ export class JourneyService {
   }
 
   /**
-   * Loads timetable rows for every bus route the path uses, resolving each
-   * route-stop route number into the timetable namespace first.
+   * Loads real timetable data for every route the path uses: bus rows keyed by
+   * route number, and Metro runs keyed by the exact boarding pair. Both sources
+   * are optional, and a missing source degrades to static estimates rather than
+   * failing the request.
    */
   private async loadTimetableIndex(result: PathResult, graph: Awaited<ReturnType<typeof getGraph>>): Promise<TimetableIndex> {
     const byRouteNo = new Map<string, BusTimetableRow[]>();
     const unresolvedRoutes: string[] = [];
+    const metroByLeg = new Map<string, MetroLegRun[]>();
+    const metroLinesWithoutTimetable = new Set<string>();
 
     const busRouteNos = new Set<string>();
+    /** line -> distinct `from|to` boarding pairs, so each leg is fetched once. */
+    const metroLegs = new Map<string, Set<string>>();
+
     for (const step of result.steps) {
       const edge = step.edge;
-      if (isRideEdge(edge) && edge.mode === "BUS") busRouteNos.add(edge.routeNo ?? "");
+      if (!isRideEdge(edge)) continue;
+      if (edge.mode === "BUS") {
+        busRouteNos.add(edge.routeNo ?? "");
+        continue;
+      }
+      if (edge.mode !== "METRO") continue;
+
+      const fromName = graph.getNode(step.fromNodeId)?.name;
+      const toName = graph.getNode(step.toNodeId)?.name;
+      if (!fromName || !toName) continue;
+      const pairs = metroLegs.get(edge.routeNo ?? "") ?? new Set<string>();
+      pairs.add(metroLegKey(edge.routeNo ?? "", fromName, toName));
+      metroLegs.set(edge.routeNo ?? "", pairs);
     }
 
-    if (busRouteNos.size === 0) return { byRouteNo, unresolvedRoutes };
-
-    const resolution = new Map<string, string[]>();
-    for (const routeNo of busRouteNos) {
-      if (routeNo.length === 0) continue;
-      try {
-        resolution.set(routeNo, await resolveTimetableRouteNos("BUS", routeNo));
-      } catch {
-        // No database: fall back to the route number as-is.
-        resolution.set(routeNo, [routeNo]);
+    for (const [line, keys] of metroLegs) {
+      for (const key of keys) {
+        const { from: fromName, to: toName } = splitMetroLegKey(key);
+        try {
+          const runs = await getMetroRunsBetweenStations(line, fromName, toName);
+          if (runs.length > 0) metroByLeg.set(key, runs);
+        } catch {
+          // No database or line absent from the source: fall through to the
+          // static estimate. Never fail a journey request over timing data.
+        }
+      }
+      if (line.length > 0 && ![...metroByLeg.keys()].some((key) => key.startsWith(`${line}|`))) {
+        metroLinesWithoutTimetable.add(line);
       }
     }
 
-    const allTargets = [...new Set([...resolution.values()].flat())];
-    let rows: BusTimetableRow[] = [];
-    try {
-      rows = await getTimetableForRouteNos(allTargets);
-    } catch {
-      rows = [];
+    if (busRouteNos.size > 0) {
+      const resolution = new Map<string, string[]>();
+      for (const routeNo of busRouteNos) {
+        if (routeNo.length === 0) continue;
+        try {
+          resolution.set(routeNo, await resolveTimetableRouteNos("BUS", routeNo));
+        } catch {
+          // No database: fall back to the route number as-is.
+          resolution.set(routeNo, [routeNo]);
+        }
+      }
+
+      const allTargets = [...new Set([...resolution.values()].flat())];
+      let rows: BusTimetableRow[] = [];
+      try {
+        rows = await getTimetableForRouteNos(allTargets);
+      } catch {
+        rows = [];
+      }
+
+      for (const row of rows) {
+        const bucket = byRouteNo.get(row.route_no);
+        if (bucket) bucket.push(row);
+        else byRouteNo.set(row.route_no, [row]);
+      }
+
+      for (const [routeNo, targets] of resolution) {
+        const hasAny = targets.some((target) => (byRouteNo.get(target)?.length ?? 0) > 0);
+        if (!hasAny) unresolvedRoutes.push(routeNo);
+      }
     }
 
-    for (const row of rows) {
-      const bucket = byRouteNo.get(row.route_no);
-      if (bucket) bucket.push(row);
-      else byRouteNo.set(row.route_no, [row]);
-    }
-
-    for (const [routeNo, targets] of resolution) {
-      const hasAny = targets.some((target) => (byRouteNo.get(target)?.length ?? 0) > 0);
-      if (!hasAny) unresolvedRoutes.push(routeNo);
-    }
-
-    void graph;
-    return { byRouteNo, unresolvedRoutes };
+    return {
+      byRouteNo,
+      unresolvedRoutes,
+      metroByLeg,
+      metroLinesWithoutTimetable: [...metroLinesWithoutTimetable],
+    };
   }
 
   /**
@@ -419,8 +476,13 @@ export class JourneyService {
       timingConfidence: "ESTIMATED",
     };
 
-    // Timetable awareness only applies to bus, because bus is the only mode
-    // with a timetable source file.
+    // Timetable awareness differs by mode because the two sources differ in
+    // shape: bus has one departure and one arrival per trip and no per-stop
+    // times, whereas Metro checkpoints carry a time per station.
+    if (ride.mode === "METRO") {
+      return this.applyMetroTiming(segment, ride, context);
+    }
+
     if (ride.mode !== "BUS" || context.timetable.byRouteNo.size === 0) {
       return segment;
     }
@@ -480,6 +542,125 @@ export class JourneyService {
     return segment;
   }
 
+  /**
+   * Fills a Metro leg with real times when the timetable can supply them.
+   *
+   * The data is not uniform, so each case is labelled for what it actually is:
+   *
+   *  1. `boardTime` and `alightTime` both present -> EXACT. The timetable printed
+   *     both ends for this specific run.
+   *  2. `boardTime` present, no printed alighting time -> the boarding time is
+   *     real, and the ride is scaled along the run's real duration using the
+   *     station's real position on the line. SCALED, never EXACT.
+   *  3. Neither printed -> scaled from the run's own departure along its real
+   *     duration. SCALED.
+   *  4. No run at all, e.g. the map-only Pink line -> the graph's static
+   *     estimate is kept and stays ESTIMATED.
+   */
+  private applyMetroTiming(
+    segment: JourneySegment,
+    ride: { routeNo: string },
+    context: { timetable: TimetableIndex; requestMinutes: number | null; warnings: string[] },
+  ): JourneySegment {
+    const from = segment.from;
+    const to = segment.to;
+    if (!from || !to) return segment;
+
+    const runs = context.timetable.metroByLeg.get(metroLegKey(ride.routeNo, from, to));
+    if (!runs || runs.length === 0) {
+      if (context.timetable.metroLinesWithoutTimetable.includes(ride.routeNo)) {
+        context.warnings.push(
+          `Metro line ${ride.routeNo} has no timetable in the source data, so its timing is a static estimate.`,
+        );
+      }
+      return segment;
+    }
+
+    const run = pickMetroRun(runs, context.requestMinutes);
+    if (!run) return segment;
+
+    segment.tripId = run.tripId;
+    segment.serviceDay = run.serviceDay;
+    segment.direction = run.direction;
+    if (run.trainNo) segment.tripNo = undefined;
+
+    const boardMinutes = parseClockToMinutes(run.boardTime ?? run.runDepartureTime);
+    const runDuration = run.runDurationMinutes ?? minutesBetween(run.runDepartureTime, run.runArrivalTime);
+    const runHops = run.runHops > 0 ? run.runHops : null;
+    const legHops = run.legHops > 0 ? run.legHops : null;
+
+    // Case 1: both ends printed for this run.
+    const alightMinutes = parseClockToMinutes(run.alightTime);
+    if (run.boardTime && run.alightTime && boardMinutes !== null && alightMinutes !== null) {
+      const minutes = alightMinutes - boardMinutes;
+      if (minutes > 0) {
+        segment.estimatedMinutes = minutes;
+        segment.departureTime = formatMinutesToClock(boardMinutes);
+        segment.arrivalTime = formatMinutesToClock(alightMinutes);
+        segment.timingConfidence = "EXACT";
+        this.applyWait(segment, boardMinutes, context);
+        return segment;
+      }
+    }
+
+    // Cases 2 and 3: scale the run's real duration by how much of the line the
+    // passenger actually covers.
+    //
+    // The two cases differ in where the clock starts, and getting that wrong
+    // would move a real printed time: when `boardTime` exists it IS the moment
+    // the train left the boarding station, so only the leg beyond it is
+    // projected. Without it, the projection runs from the run's own departure
+    // at its origin.
+    if (runDuration !== null && runDuration > 0 && runHops !== null && legHops !== null) {
+      const hasPrintedBoard = run.boardTime !== null && boardMinutes !== null;
+      const clockStart = hasPrintedBoard ? boardMinutes : parseClockToMinutes(run.runDepartureTime);
+      if (clockStart === null) return segment;
+
+      const legFrom = hasPrintedBoard
+        ? 0
+        : Math.abs(run.boardPosition - run.originPosition);
+      const legTo = hasPrintedBoard
+        ? Math.abs(run.alightPosition - run.boardPosition)
+        : Math.abs(run.alightPosition - run.originPosition);
+
+      const boardingAt = clockStart + Math.round((runDuration * legFrom) / runHops);
+      const alightingAt = clockStart + Math.round((runDuration * legTo) / runHops);
+      if (alightingAt <= boardingAt) return segment;
+
+      segment.departureTime = formatMinutesToClock(boardingAt);
+      segment.arrivalTime = formatMinutesToClock(alightingAt);
+      segment.estimatedMinutes = alightingAt - boardingAt;
+      segment.timingConfidence = "SCALED";
+      this.applyWait(segment, boardingAt, context);
+      return segment;
+    }
+
+    // Case 4 for this leg: a run exists but has no usable duration, so the
+    // graph's own per-hop estimate is the only honest answer available.
+    return segment;
+  }
+
+  /** Mirrors the bus wait logic so both modes report a changeover the same way. */
+  private applyWait(
+    segment: JourneySegment,
+    boardingAt: number,
+    context: { requestMinutes: number | null; warnings: string[] },
+  ): void {
+    if (context.requestMinutes === null) return;
+    const wait = boardingAt - context.requestMinutes;
+    if (wait >= 0) {
+      segment.waitMinutes = wait;
+      return;
+    }
+    // The requested time is after the last service in the loaded data, so the
+    // reported departure belongs to the next service day rather than today.
+    segment.waitMinutes = wait + 24 * 60;
+    context.warnings.push(
+      `No Metro service departs after ${formatMinutesToClock(context.requestMinutes)} in the loaded data; ` +
+        `the reported time assumes the next service day, roughly a day later.`,
+    );
+  }
+
   private tripsForRoute(index: TimetableIndex, routeNo: string): BusTimetableRow[] {
     const direct = index.byRouteNo.get(routeNo);
     if (direct && direct.length > 0) return direct;
@@ -536,10 +717,64 @@ function pickTrip(trips: BusTimetableRow[], fromMinutes: number | null): BusTime
   );
 }
 
+/** `line|from|to`, unambiguous when one station pair is served by two lines. */
+function metroLegKey(line: string, from: string, to: string): string {
+  return `${line}|${from.toLowerCase()}|${to.toLowerCase()}`;
+}
+
+function splitMetroLegKey(key: string): { line: string; from: string; to: string } {
+  const separator = key.indexOf("|");
+  const second = key.indexOf("|", separator + 1);
+  return {
+    line: key.slice(0, separator),
+    from: key.slice(separator + 1, second),
+    to: key.slice(second + 1),
+  };
+}
+
+/**
+ * The run a passenger would actually board.
+ *
+ * Preference order, so a real exact match is never passed over for an
+ * interpolated one:
+ *  1. Runs with both ends printed, soonest after the requested time.
+ *  2. Any run with a printed boarding time, soonest after the requested time.
+ *  3. Whichever run is soonest overall, since a departure before the requested
+ *     time is still the closest thing the data offers.
+ *
+ * The service day is not part of this choice: the request carries a clock time,
+ * not a date, so runs from every loaded service pattern compete on clock time
+ * alone. The winning run's `serviceDay` is reported on the segment so the
+ * caller can see which pattern was matched.
+ */
+function pickMetroRun(runs: MetroLegRun[], fromMinutes: number | null): MetroLegRun | null {
+  const usable = runs.filter((run) => parseClockToMinutes(run.boardTime ?? run.runDepartureTime) !== null);
+  if (usable.length === 0) return null;
+  const effectiveFrom = fromMinutes ?? nowMinutes();
+
+  const departureOf = (run: MetroLegRun): number =>
+    parseClockToMinutes(run.boardTime ?? run.runDepartureTime) ?? Number.MAX_SAFE_INTEGER;
+  const isUpcoming = (run: MetroLegRun): boolean => departureOf(run) >= effectiveFrom;
+  const isExact = (run: MetroLegRun): boolean => run.boardTime !== null && run.alightTime !== null;
+
+  const bySoonest = (a: MetroLegRun, b: MetroLegRun): number => departureOf(a) - departureOf(b);
+
+  const exactUpcoming = usable.filter((run) => isExact(run) && isUpcoming(run)).sort(bySoonest);
+  if (exactUpcoming.length > 0) return exactUpcoming[0]!;
+
+  const anyUpcoming = usable.filter(isUpcoming).sort(bySoonest);
+  if (anyUpcoming.length > 0) return anyUpcoming[0]!;
+
+  const exactAny = usable.filter(isExact).sort(bySoonest);
+  if (exactAny.length > 0) return exactAny[0]!;
+
+  return [...usable].sort(bySoonest)[0] ?? null;
+}
+
 /**
  * Only returns a distance when every ride leg has one. Omitting the field is
  * the correct behaviour: the specification forbids fabricating distance data,
- * and the bus/tram source has none.
+ * and the bus and metro source has none.
  */
 function computeTotalDistanceKm(segments: JourneySegment[]): number | null {
   const distances = segments

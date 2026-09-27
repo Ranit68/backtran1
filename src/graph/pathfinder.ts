@@ -65,7 +65,7 @@ function heuristic(graph: TransportGraph, fromId: string, toId: string): number 
     typeof to.latitude !== "number" ||
     typeof to.longitude !== "number"
   ) {
-    // No coordinates (the current bus/tram data set). A zero heuristic makes
+    // No coordinates (the current bus/metro data set). A zero heuristic makes
     // this Dijkstra, which is correct -- just not guided.
     return 0;
   }
@@ -79,7 +79,7 @@ function heuristic(graph: TransportGraph, fromId: string, toId: string): number 
  * Whether an edge may be used given the requested mode filter.
  *
  * A transfer edge is allowed only when both of its endpoints are reachable
- * under the filter, so `mode=BUS` cannot silently hop onto a tram.
+ * under the filter, so `mode=BUS` cannot silently hop onto the Metro.
  */
 function edgeAllowed(edge: GraphEdge, graph: TransportGraph, modes: "ALL" | TransportMode): boolean {
   if (modes === "ALL") return true;
@@ -275,7 +275,7 @@ function reconstruct(
  * candidate destination nodes, returning the cheapest combination.
  *
  * The planner resolves a user-typed place name to multiple graph nodes (for
- * example "Esplanade" exists as both a bus stop and a tram stop) and then has
+ * example "Esplanade" exists as both a bus stop and a Metro station) and then has
  * to pick the pairing that actually connects.
  */
 export function findBestPathAcross(

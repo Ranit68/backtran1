@@ -46,12 +46,57 @@ export const routeListQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
-export const tramRouteListQuerySchema = z.object({
-  operator: z.string().trim().min(1).max(50).optional(),
+/**
+ * Metro lines are identified by their code ("BLUE"), not by a bus-style route
+ * number, so there is no `operator` filter: the source data has a single fixed
+ * operator, "Metro Railway".
+ */
+export const metroLineListQuerySchema = z.object({
   q: z.string().trim().max(120).optional(),
-  sort: z.enum(["route_no", "stop_count"]).default("route_no"),
+  sort: z.enum(["line", "stop_count", "trip_count"]).default("line"),
   order: z.enum(["asc", "desc"]).default("asc"),
   limit: z.coerce.number().int().min(1).max(500).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+/** Station listing can be narrowed to one line or a free-text name. */
+export const metroStationListQuerySchema = z.object({
+  line: z.string().trim().min(1).max(40).optional(),
+  q: z.string().trim().max(120).optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(100),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+/** Service days and directions come straight from the supplied Metro tables. */
+const metroServiceDaySchema = z.enum(["WEEKDAY", "SATURDAY", "SUNDAY"]);
+const metroDirectionSchema = z.enum(["UP", "DOWN"]);
+
+export const metroTripListQuerySchema = z
+  .object({
+    line: z.string().trim().min(1, "line is required").max(40),
+    serviceDay: metroServiceDaySchema.optional(),
+    direction: metroDirectionSchema.optional(),
+    /** Only trips departing at or after this HH:MM. */
+    from: z
+      .string()
+      .trim()
+      .regex(/^\d{1,2}:[0-5]\d$/, "from must be HH:MM")
+      .optional(),
+    limit: z.coerce.number().int().min(1).max(500).default(100),
+    offset: z.coerce.number().int().min(0).default(0),
+  })
+  .transform((value) => ({ ...value, serviceDay: value.serviceDay, direction: value.direction }));
+
+export const metroStationTimetableQuerySchema = z.object({
+  serviceDay: metroServiceDaySchema.optional(),
+  direction: metroDirectionSchema.optional(),
+  /** Only departures at or after this HH:MM. */
+  from: z
+    .string()
+    .trim()
+    .regex(/^\d{1,2}:[0-5]\d$/, "from must be HH:MM")
+    .optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(100),
   offset: z.coerce.number().int().min(0).default(0),
 });
 

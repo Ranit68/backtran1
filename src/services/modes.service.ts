@@ -1,29 +1,52 @@
-import * as metroRepository from "../repositories/metro.repository.js";
 import * as ferryRepository from "../repositories/ferry.repository.js";
+import { isMetroConfigured } from "../repositories/metro.repository.js";
+import { getMetroService } from "./metro.service.js";
 import { AppError, ErrorCode } from "../utils/errors.js";
 
 /**
- * Metro and Ferry services.
+ * Mode facades used by the controllers.
  *
- * Both modes are reserved in the API surface but carry no data in this build
- * (see the repository files for the full rationale and for the exact steps
- * needed to enable each). They pass the repository errors straight through so
- * clients receive the standard error envelope with HTTP 501 rather than an
- * empty list that would imply "Kolkata has no metro / no ferries".
+ * Metro is implemented: the four Metro tables exist in the database and hold a
+ * complete station list plus 1,720 real scheduled trips, so its handlers return
+ * real data.
+ *
+ * Ferry is still reserved with no data in this build, and keeps passing its
+ * repository errors through so clients get the standard error envelope with
+ * HTTP 501 rather than an empty list that would imply "Kolkata has no ferries".
  */
 
 export const MetroService = {
-  listStations: () => metroRepository.listMetroStations(),
-  getStation: (stationId: string) => metroRepository.getMetroStation(stationId),
-  listRoutes: () => metroRepository.listMetroRoutes(),
-  getRoute: (routeId: string) => metroRepository.getMetroRoute(routeId),
-  searchStations: (term: string, limit: number) => metroRepository.searchMetroStations(term, limit),
-  isConfigured: () => metroRepository.isMetroConfigured(),
+  listStations: (filter: { line?: string; q?: string; limit: number; offset: number }) =>
+    getMetroService().getStations(filter),
+  getStation: (stationId: string) => getMetroService().getStation(stationId),
+  getStationTimetable: (
+    stationId: string,
+    filter: { serviceDay?: string; direction?: string; from?: string; limit: number; offset: number },
+  ) => getMetroService().getStationTimetable(stationId, filter),
+  listRoutes: (filter: { q?: string; sort?: "line" | "stop_count" | "trip_count"; order?: "asc" | "desc"; limit: number; offset: number }) =>
+    getMetroService().listRoutes(filter),
+  getRoute: (routeId: string) => getMetroService().getRoute(routeId),
+  listTrips: (filter: {
+    line: string;
+    serviceDay?: string;
+    direction?: string;
+    from?: string;
+    limit: number;
+    offset: number;
+  }) => getMetroService().listTrips(filter),
+  searchStations: (term: string, limit: number) => getMetroService().searchStations(term, limit),
+  isConfigured: () => isMetroConfigured(),
+  diagnostics: () => getMetroService().diagnostics(),
   status: () => ({
     mode: "METRO" as const,
-    implemented: false as const,
-    reason: metroRepository.METRO_NOT_CONFIGURED_MESSAGE,
-    requiredTables: metroRepository.METRO_REQUIRED_TABLES,
+    implemented: true as const,
+    reason: null,
+    requiredTables: [
+      "metro_routes",
+      "metro_stations",
+      "metro_trips",
+      "metro_timetable_checkpoints",
+    ],
   }),
 };
 

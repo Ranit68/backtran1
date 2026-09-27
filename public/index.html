@@ -1,0 +1,1121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backtran — Kolkata bus &amp; metro planner</title>
+<meta name="description" content="Plan journeys across the Kolkata WBTC bus and Kolkata Metro network. Live routing, route and stop lookup, and full API access.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230E141C'/%3E%3Cpath d='M8 6v20M24 6v20M8 11h16M8 21h16' stroke='%23E5B53C' stroke-width='2.2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#0E141C; --ink-2:#151D28; --ink-3:#1D2734; --line:#2A3644;
+  --paper:#E9EDF3; --mute:#93A1B2; --faint:#6B798C;
+  --bus:#E4573D; --metro:#3E7BD6; --walk:#46A596; --accent:#E5B53C;
+  --ok:#4FB477; --bad:#D9534F;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  --sign:"Barlow Condensed","Arial Narrow",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --r:10px;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--ink); color:var(--paper);
+  font:400 15px/1.55 var(--sans);
+  background-image:
+    radial-gradient(1200px 600px at 78% -8%, rgba(229,181,60,.09), transparent 62%),
+    radial-gradient(900px 500px at 8% 0%, rgba(70,165,150,.07), transparent 60%);
+  background-attachment:fixed;
+}
+h1,h2,h3{margin:0; font-weight:600; line-height:1.15}
+a{color:var(--accent)}
+.wrap{max-width:1180px; margin:0 auto; padding:0 20px}
+.mono{font-family:var(--mono); font-variant-numeric:tabular-nums}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:4px}
+.sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+/* ---------- masthead ---------- */
+.mast{border-bottom:1px solid var(--line); background:rgba(14,20,28,.82); backdrop-filter:blur(8px); position:sticky; top:0; z-index:40}
+.mast__in{display:flex; align-items:center; gap:16px; padding:12px 0; flex-wrap:wrap}
+.brand{display:flex; align-items:center; gap:10px; margin-right:auto}
+.brand__mark{width:30px;height:30px;flex:none}
+.brand__name{font:700 25px/1 var(--sign); letter-spacing:.10em; text-transform:uppercase}
+.brand__sub{font:500 10px/1 var(--mono); letter-spacing:.16em; color:var(--faint); text-transform:uppercase; margin-top:3px}
+.live{display:flex; align-items:center; gap:8px; font:500 12px/1 var(--mono); color:var(--mute);
+  background:var(--ink-2); border:1px solid var(--line); border-radius:999px; padding:7px 12px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--faint);flex:none}
+.dot--ok{background:var(--ok); box-shadow:0 0 0 3px rgba(79,180,119,.18)}
+.dot--bad{background:var(--bad); box-shadow:0 0 0 3px rgba(217,83,79,.18)}
+.mast__btn{background:var(--ink-2); color:var(--paper); border:1px solid var(--line); border-radius:8px;
+  padding:7px 12px; font:500 12px/1 var(--mono); cursor:pointer}
+.mast__btn:hover{border-color:var(--faint)}
+
+/* ---------- tabs ---------- */
+.tabs{display:flex; gap:2px; overflow-x:auto; scrollbar-width:none; border-bottom:1px solid var(--line);
+  position:sticky; top:55px; background:rgba(14,20,28,.92); backdrop-filter:blur(8px); z-index:39}
+.tabs::-webkit-scrollbar{display:none}
+.tab{appearance:none; background:none; border:0; border-bottom:2px solid transparent; color:var(--mute);
+  font:600 14px/1 var(--sign); letter-spacing:.09em; text-transform:uppercase; padding:13px 15px; cursor:pointer; white-space:nowrap}
+.tab:hover{color:var(--paper)}
+.tab[aria-selected="true"]{color:var(--accent); border-bottom-color:var(--accent)}
+main{padding:26px 0 72px}
+.panel[hidden]{display:none}
+
+/* ---------- cards ---------- */
+.card{background:var(--ink-2); border:1px solid var(--line); border-radius:var(--r); padding:18px}
+.card--pad{margin-bottom:16px}
+.grid2{display:grid; grid-template-columns:1fr; gap:16px}
+@media(min-width:900px){ .grid2{grid-template-columns:minmax(0,1fr) 300px; align-items:start} }
+
+.lab{display:block; font:600 10px/1 var(--mono); letter-spacing:.15em; text-transform:uppercase;
+  color:var(--faint); margin-bottom:7px}
+.inp{width:100%; background:var(--ink); border:1px solid var(--line); color:var(--paper);
+  border-radius:8px; padding:11px 12px; font:400 15px/1.3 var(--sans)}
+.inp::placeholder{color:var(--faint)}
+.inp:focus{border-color:var(--accent); outline:none; box-shadow:0 0 0 3px rgba(229,181,60,.14)}
+select.inp{font-family:var(--mono); font-size:13px; cursor:pointer}
+.field{position:relative}
+.field .inp{padding-right:38px}
+.ac{position:absolute; top:calc(100% + 5px); left:0; right:0; background:var(--ink-3);
+  border:1px solid var(--line); border-radius:8px; overflow:hidden; z-index:50; max-height:280px; overflow-y:auto;
+  box-shadow:0 12px 32px rgba(0,0,0,.5)}
+.ac[hidden]{display:none}
+.ac__i{display:flex; align-items:center; gap:9px; padding:9px 11px; cursor:pointer; font-size:14px; border-bottom:1px solid rgba(42,54,68,.55)}
+.ac__i:last-child{border-bottom:0}
+.ac__i:hover,.ac__i[data-active="true"]{background:rgba(229,181,60,.13)}
+.ac__i small{color:var(--faint); font-family:var(--mono); font-size:11px; margin-left:auto}
+.swap{position:absolute; right:2px; top:50%; transform:translateY(-50%); background:var(--ink-3); color:var(--paper);
+  border:1px solid var(--line); border-radius:6px; width:28px; height:28px; cursor:pointer; font-size:13px; line-height:1}
+.swap:hover{border-color:var(--accent)}
+.row{display:grid; grid-template-columns:1fr; gap:12px; position:relative}
+@media(min-width:620px){ .row{grid-template-columns:1fr auto 1fr; align-items:end} }
+.ctl{display:grid; grid-template-columns:1fr; gap:12px; margin-top:14px}
+@media(min-width:620px){ .ctl{grid-template-columns:auto auto 1fr; align-items:end} }
+.checks{display:flex; gap:14px; flex-wrap:wrap; align-items:center; padding:9px 0}
+.chk{display:inline-flex; align-items:center; gap:7px; font:500 12px/1 var(--mono); color:var(--mute); cursor:pointer; text-transform:uppercase; letter-spacing:.08em}
+.chk input{accent-color:var(--accent); width:15px; height:15px; margin:0}
+.btn{appearance:none; border:0; border-radius:8px; padding:13px 20px; cursor:pointer;
+  font:600 14px/1 var(--sign); letter-spacing:.11em; text-transform:uppercase; background:var(--accent); color:#1A1408; width:100%}
+.btn:hover{filter:brightness(1.09)}
+.btn[disabled]{opacity:.55; cursor:progress}
+.btn--ghost{background:transparent; color:var(--mute); border:1px solid var(--line); font-family:var(--mono);
+  font-size:12px; letter-spacing:.04em; text-transform:none; padding:9px 13px; width:auto}
+.btn--ghost:hover{color:var(--paper); border-color:var(--faint)}
+
+/* ---------- the track: the signature ---------- */
+.res{margin-top:20px}
+.ride{position:relative; padding-left:52px; padding-bottom:4px}
+.ride::before,.ride::after{content:''; position:absolute; top:-2px; bottom:-2px; width:2px; background:var(--m); opacity:.9}
+.ride::before{left:8px} .ride::after{left:28px}
+.stop{position:relative; padding:0 0 20px; list-style:none}
+.stop::before{content:''; position:absolute; left:-44px; top:10px; width:20px; height:1px; background:var(--m); opacity:.5}
+.stop__dot{position:absolute; left:-40px; top:3px; width:12px; height:12px; border-radius:50%;
+  background:var(--ink); border:2px solid var(--m)}
+.stop--term .stop__dot{background:var(--m); transform:scale(1.22)}
+.stop__name{font-weight:500; font-size:15px}
+.stop__meta{display:block; font:500 11px/1.4 var(--mono); color:var(--faint); margin-top:2px}
+.leg{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:2px 0 12px}
+.mode{font:600 10px/1 var(--mono); letter-spacing:.13em; text-transform:uppercase; padding:5px 8px;
+  border-radius:5px; background:var(--m); color:#10151C}
+.rt{font:600 19px/1 var(--mono); color:var(--m)}
+.min{font:500 12px/1 var(--mono); color:var(--mute)}
+.conf{font:500 10px/1 var(--mono); letter-spacing:.1em; text-transform:uppercase; padding:4px 7px;
+  border-radius:4px; border:1px solid var(--line); color:var(--faint)}
+.conf--scheduled{color:var(--ok); border-color:rgba(79,180,119,.45)}
+.link{position:relative; padding-left:52px; padding:2px 0 22px; list-style:none}
+.link__line{position:absolute; left:18px; top:-4px; height:40px; width:2px;
+  background:repeating-linear-gradient(to bottom,var(--walk) 0 5px,transparent 5px 10px)}
+.link__blade{position:absolute; left:8px; top:6px; width:22px; height:1px; background:var(--walk); opacity:.85}
+.chip{display:inline-flex; align-items:center; gap:6px; font:500 11px/1 var(--mono); letter-spacing:.09em;
+  text-transform:uppercase; color:var(--walk); background:rgba(70,165,150,.11);
+  border:1px solid rgba(70,165,150,.4); border-radius:999px; padding:5px 10px}
+.chip--transfer{color:var(--mute); background:var(--ink-3); border-color:var(--line)}
+
+/* ---------- summary rail ---------- */
+.sum{position:sticky; top:108px}
+.big{font:700 60px/.85 var(--sign); letter-spacing:-.01em; color:var(--accent)}
+.big small{font:500 15px/1 var(--mono); color:var(--mute); letter-spacing:.06em; margin-left:5px}
+.kv{display:flex; justify-content:space-between; gap:12px; padding:9px 0; border-bottom:1px solid var(--line); font-size:13px}
+.kv:last-child{border-bottom:0}
+.kv b{font:500 13px/1.3 var(--mono); text-align:right; color:var(--paper)}
+.kv span{color:var(--faint)}
+.warns{margin:14px 0 0; padding:0; list-style:none}
+.warns li{font-size:12.5px; line-height:1.5; color:var(--mute); padding:9px 0 9px 15px; position:relative; border-top:1px solid var(--line)}
+.warns li::before{content:'!'; position:absolute; left:0; color:var(--accent); font:600 12px/1.5 var(--mono)}
+
+/* ---------- lists ---------- */
+.bar{display:grid; grid-template-columns:1fr; gap:10px; margin-bottom:16px}
+@media(min-width:680px){ .bar{grid-template-columns:2fr 1fr 1fr auto; align-items:center} }
+.list{border:1px solid var(--line); border-radius:var(--r); overflow:hidden; background:var(--ink-2)}
+.rowitem{display:flex; align-items:center; gap:13px; width:100%; text-align:left; background:none; color:var(--paper);
+  border:0; border-bottom:1px solid var(--line); padding:12px 14px; cursor:pointer; font:inherit}
+.rowitem:last-child{border-bottom:0}
+.rowitem:hover{background:var(--ink-3)}
+.rt--lg{font:600 17px/1 var(--mono); color:var(--m); min-width:64px}
+.rowitem__t{font-weight:500}
+.rowitem__s{font:500 11.5px/1.4 var(--mono); color:var(--faint); margin-top:2px}
+.pill{margin-left:auto; font:500 11px/1 var(--mono); color:var(--mute); background:var(--ink);
+  border:1px solid var(--line); border-radius:999px; padding:5px 9px; white-space:nowrap}
+.empty{padding:34px 20px; text-align:center; color:var(--faint); font-size:14px}
+.empty b{display:block; color:var(--paper); font:600 15px/1.3 var(--sans); margin-bottom:6px}
+.hint{font-size:13px; color:var(--faint); margin:0 0 14px}
+.tag{font:500 10px/1 var(--mono); letter-spacing:.1em; text-transform:uppercase; padding:4px 7px; border-radius:4px;
+  border:1px solid var(--line); color:var(--mute)}
+.tag--no{color:var(--bad); border-color:rgba(217,83,79,.45)}
+.tag--yes{color:var(--ok); border-color:rgba(79,180,119,.45)}
+
+/* ---------- tables ---------- */
+.tt{width:100%; border-collapse:collapse; font-size:13.5px}
+.tt th{text-align:left; font:600 10px/1 var(--mono); letter-spacing:.14em; text-transform:uppercase;
+  color:var(--faint); padding:9px 10px; border-bottom:1px solid var(--line); white-space:nowrap}
+.tt td{padding:9px 10px; border-bottom:1px solid var(--line)}
+.tt tr:last-child td{border-bottom:0}
+.tt td.mono{color:var(--paper)}
+.scroll{overflow-x:auto; -webkit-overflow-scrolling:touch}
+
+/* ---------- api explorer ---------- */
+.eg{border:1px solid var(--line); border-radius:8px; margin-bottom:8px; overflow:hidden; background:var(--ink-2)}
+.eg__h{display:flex; align-items:center; gap:10px; padding:10px 12px; cursor:pointer; width:100%;
+  background:none; border:0; color:var(--paper); text-align:left; font:inherit}
+.eg__h:hover{background:var(--ink-3)}
+.verb{font:600 10px/1 var(--mono); letter-spacing:.1em; padding:5px 7px; border-radius:4px; min-width:46px; text-align:center; flex:none}
+.verb--get{background:rgba(79,180,119,.16); color:var(--ok)}
+.verb--post{background:rgba(229,181,60,.16); color:var(--accent)}
+.eg__p{font:400 13px/1.4 var(--mono); color:var(--mute); word-break:break-all}
+.eg__b{padding:12px; border-top:1px solid var(--line); display:none; flex-direction:column; gap:10px}
+.eg[data-open="true"] .eg__b{display:flex}
+.prms{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:9px}
+.prm{display:flex; flex-direction:column; gap:5px}
+.prm label{font:600 9.5px/1 var(--mono); letter-spacing:.13em; text-transform:uppercase; color:var(--faint)}
+.prm .inp{padding:8px 9px; font:400 13px/1.3 var(--mono)}
+.prm textarea{width:100%; min-height:88px; background:var(--ink); border:1px solid var(--line); color:var(--paper);
+  border-radius:8px; padding:9px; font:400 12.5px/1.5 var(--mono); resize:vertical}
+.resp{background:var(--ink); border:1px solid var(--line); border-radius:8px; padding:11px; max-height:400px; overflow:auto}
+.resp pre{margin:0; font:400 12px/1.55 var(--mono); color:var(--paper); white-space:pre-wrap; word-break:break-word}
+.st{font:600 11px/1 var(--mono); padding:4px 8px; border-radius:4px; margin-right:9px; display:inline-block}
+.st--2{background:rgba(79,180,119,.16); color:var(--ok)}
+.st--4{background:rgba(229,181,60,.16); color:var(--accent)}
+.st--5{background:rgba(217,83,79,.16); color:var(--bad)}
+.note{background:var(--ink-3); border-left:2px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:10px 13px; font-size:12.5px; color:var(--mute); margin-bottom:16px}
+.note b{color:var(--paper)}
+.sect{margin:26px 0 12px; font:600 12px/1 var(--mono); letter-spacing:.15em; text-transform:uppercase; color:var(--faint);
+  display:flex; align-items:center; gap:11px}
+.sect::after{content:''; flex:1; height:1px; background:var(--line)}
+.spin{display:inline-block; width:13px; height:13px; border:2px solid rgba(255,255,255,.28);
+  border-top-color:var(--accent); border-radius:50%; animation:sp .7s linear infinite; vertical-align:-2px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.err{background:rgba(217,83,79,.1); border:1px solid rgba(217,83,79,.42); color:#FFC9C6;
+  border-radius:8px; padding:12px 14px; font-size:13.5px; margin-top:14px}
+.err b{display:block; color:var(--bad); font:600 11px/1 var(--mono); letter-spacing:.1em; text-transform:uppercase; margin-bottom:6px}
+.ok-note{color:var(--ok)}
+@media(prefers-reduced-motion:reduce){ *,*::before,*::after{animation-duration:.01ms !important; transition-duration:.01ms !important} }
+@media(max-width:640px){ .sum{position:static} .big{font-size:50px} .ride,.link{padding-left:44px} }
+</style>
+</head>
+<body>
+
+<header class="mast">
+  <div class="wrap mast__in">
+    <div class="brand">
+      <svg class="brand__mark" viewBox="0 0 32 32" aria-hidden="true">
+        <path d="M8 5v22M24 5v22M8 11h16M8 21h16" stroke="#E5B53C" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+      </svg>
+      <div>
+        <div class="brand__name">Backtran</div>
+        <div class="brand__sub">Kolkata bus &amp; metro</div>
+      </div>
+    </div>
+    <div class="live"><span class="dot" id="dot"></span><span id="liveTxt">checking…</span></div>
+    <button class="mast__btn" id="baseChip" type="button" title="Active API — click to change">api: …</button>
+    <button class="mast__btn" id="cfgBtn" type="button">API settings</button>
+  </div>
+</header>
+
+<nav class="tabs" role="tablist" aria-label="Sections">
+  <button class="tab" role="tab" id="t-plan"    aria-controls="p-plan"    aria-selected="true">Plan a journey</button>
+  <button class="tab" role="tab" id="t-routes"  aria-controls="p-routes"  aria-selected="false">Routes</button>
+  <button class="tab" role="tab" id="t-stops"   aria-controls="p-stops"   aria-selected="false">Stops</button>
+  <button class="tab" role="tab" id="t-network" aria-controls="p-network" aria-selected="false">Network</button>
+  <button class="tab" role="tab" id="t-api"     aria-controls="p-api"     aria-selected="false">API</button>
+</nav>
+
+<main class="wrap">
+
+  <!-- ===================== PLAN ===================== -->
+  <section class="panel" id="p-plan" role="tabpanel" aria-labelledby="t-plan">
+    <div class="card card--pad">
+      <div class="row">
+        <div class="field">
+          <label class="lab" for="from">From</label>
+          <input class="inp" id="from" placeholder="Esplanade" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="ac-from">
+          <div class="ac" id="ac-from" role="listbox" hidden></div>
+        </div>
+        <button class="swap" id="swap" type="button" title="Swap from and to" aria-label="Swap from and to">⇅</button>
+        <div class="field">
+          <label class="lab" for="to">To</label>
+          <input class="inp" id="to" placeholder="Gariahat" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="ac-to">
+          <div class="ac" id="ac-to" role="listbox" hidden></div>
+        </div>
+      </div>
+
+      <div class="ctl">
+        <div class="checks">
+          <label class="chk"><input type="checkbox" id="mBus" checked> Bus</label>
+          <label class="chk"><input type="checkbox" id="mMetro" checked> Metro</label>
+        </div>
+        <div>
+          <label class="lab" for="strategy">Optimise for</label>
+          <select class="inp" id="strategy">
+            <option value="MIN_TIME">Shortest time</option>
+            <option value="MIN_INTERCHANGE">Fewest changes</option>
+          </select>
+        </div>
+        <div>
+          <label class="lab" for="dep">Leave after <span style="text-transform:none;letter-spacing:0">(optional)</span></label>
+          <input class="inp mono" id="dep" type="time" step="60">
+        </div>
+      </div>
+
+      <div class="checks" style="padding-bottom:2px">
+        <label class="chk"><input type="checkbox" id="ttAware" checked> Use timetable</label>
+        <button class="btn" id="go" type="button" style="margin-top:14px">Find journey</button>
+      </div>
+    </div>
+
+    <div class="res grid2" id="resWrap" hidden>
+      <div id="resTrack"></div>
+      <aside class="sum" id="resSum" aria-live="polite"></aside>
+    </div>
+    <div id="resErr"></div>
+  </section>
+
+  <!-- ===================== ROUTES ===================== -->
+  <section class="panel" id="p-routes" role="tabpanel" aria-labelledby="t-routes" hidden>
+    <div class="bar">
+      <div><label class="lab" for="rQ">Find a route</label><input class="inp" id="rQ" placeholder="Route number, e.g. AC-3 or 14A"></div>
+      <div><label class="lab" for="rMode">Mode</label>
+        <select class="inp" id="rMode"><option value="BUS">Bus</option><option value="METRO">Metro</option></select></div>
+      <div><label class="lab" for="rSort">Sort</label>
+        <select class="inp" id="rSort"></select></div>
+      <div><button class="btn btn--ghost" id="rGo" type="button">Search</button></div>
+    </div>
+    <p class="hint" id="rCount">Pick a mode and search.</p>
+    <div class="list" id="rList"></div>
+    <div id="rDetail" style="margin-top:16px"></div>
+  </section>
+
+  <!-- ===================== STOPS ===================== -->
+  <section class="panel" id="p-stops" role="tabpanel" aria-labelledby="t-stops" hidden>
+    <div class="bar">
+      <div><label class="lab" for="sQ">Find a stop</label><input class="inp" id="sQ" placeholder="Stop name, e.g. Esplanade or Gariahat"></div>
+      <div><label class="lab" for="sMode">Mode</label>
+        <select class="inp" id="sMode"><option value="ALL">All modes</option><option value="BUS">Bus</option><option value="METRO">Metro</option></select></div>
+      <div><button class="btn btn--ghost" id="sGo" type="button">Search</button></div>
+    </div>
+    <p class="hint" id="sCount">Type a stop name to search across the network.</p>
+    <div class="list" id="sList"></div>
+  </section>
+
+  <!-- ===================== NETWORK ===================== -->
+  <section class="panel" id="p-network" role="tabpanel" aria-labelledby="t-network" hidden>
+    <div class="sect">Transport modes</div>
+    <div class="list" id="modesList"></div>
+
+    <div class="sect">Journey graph</div>
+    <div class="grid2">
+      <div class="list" id="graphList"></div>
+      <div class="card" id="graphSide"></div>
+    </div>
+
+    <div class="sect">Interchange detection</div>
+    <div class="list" id="trList"></div>
+
+    <div class="sect">Data import</div>
+    <div class="list" id="diagList"></div>
+  </section>
+
+  <!-- ===================== API ===================== -->
+  <section class="panel" id="p-api" role="tabpanel" aria-labelledby="t-api" hidden>
+    <div class="note">
+      <b>Every endpoint in the backend, callable from the browser.</b>
+      Responses come straight from the live API. Admin calls need a key — it is held in
+      memory for this tab only and never written to storage.
+    </div>
+    <div class="bar">
+      <div><label class="lab" for="aKey">Admin key <span style="text-transform:none;letter-spacing:0">(for /admin routes)</span></label>
+        <input class="inp mono" id="aKey" type="password" placeholder="not saved" autocomplete="off"></div>
+      <div><button class="btn btn--ghost" id="aExpand" type="button">Expand all</button></div>
+    </div>
+    <div id="apiList"></div>
+  </section>
+
+</main>
+
+<dialog id="cfg" style="border:1px solid #2A3644;border-radius:12px;background:#151D28;color:#E9EDF3;padding:0;max-width:520px;width:92vw">
+  <div style="padding:20px">
+    <h3 style="font-family:var(--sign);font-size:22px;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">API settings</h3>
+    <p style="color:#93A1B2;font-size:13px;margin:0 0 14px">Point this page at any deployment of the backend.</p>
+    <label class="lab" for="cfgBase">API base URL</label>
+    <input class="inp mono" id="cfgBase" placeholder="https://backtran1.vercel.app/api">
+    <div id="cfgMsg" style="margin-top:12px;font:500 12px/1.4 var(--mono)"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px">
+      <button class="btn btn--ghost" id="cfgTest" type="button">Test</button>
+      <button class="btn btn--ghost" id="cfgSave" type="button">Save</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+"use strict";
+/* ============================ state ============================ */
+var LS = "backtran.base";
+var DEFAULT_REMOTE = "https://backtran1.vercel.app/api";
+var base = DEFAULT_REMOTE;
+var adminKey = "";
+
+/* Prefer a same-origin /api when this page is served by the backend itself.
+   Opened from a plain static host or a local preview there is no same-origin
+   API, so fall back to the deployed backend instead of 404-ing. */
+function resolveBase() {
+  var saved = null;
+  try { saved = localStorage.getItem(LS); } catch (e) {}
+  if (saved) return Promise.resolve(saved);
+  if (location.protocol !== "http:" && location.protocol !== "https:") return Promise.resolve(DEFAULT_REMOTE);
+  var same = location.origin + "/api";
+  return fetch(same + "/health")
+    .then(function (r) { return r.ok ? same : DEFAULT_REMOTE; })
+    .catch(function () { return DEFAULT_REMOTE; });
+}
+
+var $ = function (s, r) { return (r || document).querySelector(s); };
+var esc = function (s) {
+  return String(s === null || s === undefined ? "" : s).replace(/[&<>"']/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+  });
+};
+var MODE_VAR = { BUS: "var(--bus)", METRO: "var(--metro)", WALK: "var(--walk)", TRANSFER: "var(--walk)", FERRY: "var(--mute)" };
+var modeColor = function (m) { return MODE_VAR[m] || "var(--mute)"; };
+
+/* ============================ api client ============================ */
+function api(path, opt) {
+  opt = opt || {};
+  var url;
+  try { url = new URL(base.replace(/\/+$/, "") + path); }
+  catch (e) { return Promise.resolve({ ok: false, status: 0, json: null, text: "Invalid API base URL: " + base, url: base + path, fatal: true }); }
+  if (opt.query) {
+    Object.keys(opt.query).forEach(function (k) {
+      var v = opt.query[k];
+      if (v !== "" && v !== null && v !== undefined) url.searchParams.set(k, v);
+    });
+  }
+  var headers = {};
+  if (opt.body) headers["content-type"] = "application/json";
+  if (opt.admin && adminKey) headers["x-admin-key"] = adminKey;
+  return fetch(url.toString(), {
+    method: opt.method || "GET",
+    headers: headers,
+    body: opt.body ? JSON.stringify(opt.body) : undefined
+  }).then(function (r) {
+    return r.text().then(function (t) {
+      var j = null;
+      try { j = t ? JSON.parse(t) : null; } catch (e) {}
+      return { ok: r.ok, status: r.status, json: j, text: t, url: url.toString() };
+    });
+  }).catch(function (e) {
+    return { ok: false, status: 0, json: null, text: String(e && e.message || e), url: url.toString(), fatal: true };
+  });
+}
+function msgOf(res) {
+  if (res.json) {
+    if (res.json.error) return res.json.error.message || res.json.error.code || JSON.stringify(res.json.error);
+    if (res.json.message) return res.json.message;
+  }
+  return (res.text || "").slice(0, 400) || ("HTTP " + res.status);
+}
+function errBox(host, title, res) {
+  host.innerHTML = '<div class="err"><b>' + esc(title) + " · HTTP " + res.status + "</b>" + esc(msgOf(res)) + "</div>";
+}
+
+/* ============================ health ============================ */
+function health() {
+  return api("/health").then(function (res) {
+    var dot = $("#dot"), txt = $("#liveTxt");
+    if (res.ok && res.json && res.json.data) {
+      var d = res.json.data, c = d.components || {};
+      var db = c.database || {}, g = c.graph || {};
+      dot.className = "dot " + (db.reachable === false ? "dot--bad" : "dot--ok");
+      txt.textContent = "live · " + (g.nodeCount != null ? g.nodeCount + " stops" : "ok");
+      txt.title = "database " + (db.reachable ? "reachable" : "unreachable") + " · graph " + (g.built ? "built" : "not built") + " · " + d.environment;
+    } else {
+      dot.className = "dot dot--bad";
+      txt.textContent = "unreachable";
+    }
+    return res;
+  });
+}
+
+/* ============================ tabs ============================ */
+var TABS = [["plan", function () {}], ["routes", loadRoutes], ["stops", function () {}], ["network", loadNetwork], ["api", buildExplorer]];
+TABS.forEach(function (t) {
+  $("#t-" + t[0]).addEventListener("click", function () {
+    TABS.forEach(function (x) {
+      var on = x[0] === t[0];
+      $("#t-" + x[0]).setAttribute("aria-selected", on ? "true" : "false");
+      $("#p-" + x[0]).hidden = !on;
+    });
+    t[1]();
+  });
+});
+
+/* ============================ autocomplete ============================ */
+function wireAC(inputId, acId) {
+  var inp = $("#" + inputId), ac = $("#" + acId), timer = null, items = [], cursor = -1;
+  function close() { ac.hidden = true; ac.innerHTML = ""; inp.setAttribute("aria-expanded", "false"); items = []; cursor = -1; }
+  function draw() {
+    if (!items.length) return close();
+    ac.innerHTML = items.map(function (s, i) {
+      return '<div class="ac__i" role="option" data-i="' + i + '" data-active="' + (i === cursor) + '">' +
+        '<span>' + esc(s.name) + "</span><small>" + esc(s.modes) + "</small></div>";
+    }).join("");
+    ac.hidden = false; inp.setAttribute("aria-expanded", "true");
+    Array.prototype.forEach.call(ac.children, function (el) {
+      el.addEventListener("mousedown", function (e) {
+        e.preventDefault();
+        inp.value = items[+el.dataset.i].name; close(); inp.focus();
+      });
+    });
+  }
+  function run() {
+    var q = inp.value.trim();
+    clearTimeout(timer);
+    if (q.length < 2) return close();
+    timer = setTimeout(function () {
+      api("/search", { query: { q: q, limit: 8 } }).then(function (res) {
+        if (!res.ok || !res.json || !res.json.data || !res.json.data.results) return close();
+        items = res.json.data.results;
+        cursor = -1; draw();
+      });
+    }, 220);
+  }
+  inp.addEventListener("input", run);
+  inp.addEventListener("focus", function () { if (inp.value.trim().length >= 2) run(); });
+  inp.addEventListener("blur", function () { setTimeout(close, 120); });
+  inp.addEventListener("keydown", function (e) {
+    if (ac.hidden) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      cursor = (cursor + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length; draw();
+    } else if (e.key === "Enter" && cursor >= 0) {
+      e.preventDefault(); inp.value = items[cursor].name; close();
+    } else if (e.key === "Escape") { close(); }
+  });
+}
+wireAC("from", "ac-from");
+wireAC("to", "ac-to");
+$("#swap").addEventListener("click", function () {
+  var f = $("#from").value, t = $("#to").value;
+  $("#from").value = t; $("#to").value = f; $("#from").focus();
+});
+
+/* ============================ journey ============================ */
+$("#go").addEventListener("click", plan);
+$("#from").addEventListener("keydown", function (e) { if (e.key === "Enter") plan(); });
+$("#to").addEventListener("keydown", function (e) { if (e.key === "Enter") plan(); });
+
+function plan() {
+  var from = $("#from").value.trim(), to = $("#to").value.trim();
+  var errHost = $("#resErr"); errHost.innerHTML = "";
+  if (!from || !to) {
+    errHost.innerHTML = '<div class="err"><b>Missing stop</b>Enter both a starting stop and a destination.</div>';
+    return;
+  }
+  if (from.toLowerCase() === to.toLowerCase()) {
+    errHost.innerHTML = '<div class="err"><b>Same stop</b>Pick two different stops.</div>';
+    return;
+  }
+  var mode = ($("#mBus").checked ? "BUS" : "") + ($("#mMetro").checked ? "METRO" : "");
+  if (!mode) {
+    errHost.innerHTML = '<div class="err"><b>No mode selected</b>Turn on bus or metro.</div>';
+    return;
+  }
+  if (mode.indexOf("BUS") >= 0 && mode.indexOf("METRO") >= 0) mode = "ALL";
+
+  var body = { source: from, destination: to, mode: mode, strategy: $("#strategy").value, timetableAware: $("#ttAware").checked };
+  if ($("#dep").value) body.departureTime = $("#dep").value;
+
+  var btn = $("#go"); btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> Finding';
+  $("#resWrap").hidden = true;
+
+  api("/journey", { method: "POST", body: body }).then(function (res) {
+    btn.disabled = false; btn.textContent = "Find journey";
+    if (!res.ok || !res.json || !res.json.data) { $("#resWrap").hidden = true; return errBox(errHost, "No route found", res); }
+    render(res.json.data);
+    $("#resWrap").hidden = false;
+  });
+}
+
+function render(d) {
+  var track = "";
+  var rides = d.segments.map(function (sg, i) { return { sg: sg, i: i }; }).filter(function (x) {
+    return x.sg.mode !== "TRANSFER" && x.sg.mode !== "WALK";
+  });
+  var firstRide = rides.length ? rides[0].i : -1;
+  var lastRide = rides.length ? rides[rides.length - 1].i : -1;
+
+  d.segments.forEach(function (sg) {
+    if (sg.mode === "TRANSFER" || sg.mode === "WALK") {
+      var isWalk = sg.mode === "WALK";
+      track += '<li class="link"><span class="link__line" aria-hidden="true"></span>' +
+        '<span class="link__blade" aria-hidden="true"></span>' +
+        '<span class="chip ' + (isWalk ? "" : "chip--transfer") + '">' + (isWalk ? "⇢ walk" : "⇄ change") + " · " + sg.estimatedMinutes + " min</span></li>";
+      return;
+    }
+    var c = modeColor(sg.mode);
+    var isFirst = sg === d.segments[firstRide];
+    var isLast = sg === d.segments[lastRide];
+    var stops = sg.stops.map(function (s, i) {
+      var term = (isFirst && i === 0) || (isLast && i === sg.stops.length - 1);
+      var meta = [];
+      if (isFirst && i === 0) meta.push("start");
+      if (isLast && i === sg.stops.length - 1) meta.push("destination");
+      return '<li class="stop ' + (term ? "stop--term" : "") + '"><span class="stop__dot" aria-hidden="true"></span>' +
+        '<span class="stop__name">' + esc(s) + "</span>" +
+        (meta.length ? '<span class="stop__meta">' + esc(meta.join(" · ")) + "</span>" : "") + "</li>";
+    }).join("");
+    track += '<li class="ride" style="--m:' + c + '">' +
+      '<div class="leg"><span class="mode">' + esc(sg.mode) + "</span>" +
+      (sg.routeNo ? '<span class="rt">' + esc(sg.routeNo) + "</span>" : "") +
+      (sg.operator ? '<span class="min">' + esc(sg.operator) + "</span>" : "") +
+      '<span class="min">' + sg.estimatedMinutes + " min</span>" +
+      '<span class="conf ' + (sg.timingConfidence === "SCHEDULED" ? "conf--scheduled" : "") + '">' + esc(sg.timingConfidence || "ESTIMATED") + "</span></div>" +
+      "<ol>" + stops + "</ol></li>";
+  });
+  $("#resTrack").innerHTML = '<div class="card"><div class="sect" style="margin-top:0">' + esc(d.source) +
+    " → " + esc(d.destination) + '</div><ul class="track" style="list-style:none;padding:0;margin:0">' + track + "</ul></div>";
+
+  var s = '<div class="card"><div class="big">' + d.totalTimeMinutes + "<small>min</small></div>" +
+    '<div style="margin-top:14px">' +
+    kv("Changes", d.interchangeCount) +
+    kv("Modes", (d.modesUsed || []).join(" + ") || "—") +
+    kv("Strategy", d.strategy === "MIN_TIME" ? "Shortest time" : "Fewest changes") +
+    kv("Timetable", d.timetableMatched ? "Matched" : "Static estimate") +
+    "</div>" +
+    (d.warnings && d.warnings.length ? '<ul class="warns">' + d.warnings.map(function (w) { return "<li>" + esc(w) + "</li>"; }).join("") + "</ul>" : "") +
+    "</div>";
+  $("#resSum").innerHTML = s;
+}
+function kv(k, v) { return '<div class="kv"><span>' + esc(k) + "</span><b>" + esc(v) + "</b></div>"; }
+
+/* ============================ routes ============================ */
+/**
+ * Bus routes are numbered while Metro lines are named, and the two listings
+ * sort on different fields, so the sort control is rebuilt on mode change
+ * rather than offering a value the API would reject.
+ */
+var ROUTE_SORTS = {
+  BUS: [["route_no", "Route no."], ["stop_count", "Most stops"], ["avg_trip_minutes", "Longest trip"]],
+  METRO: [["line", "Line name"], ["stop_count", "Most stations"], ["trip_count", "Most trips"]]
+};
+$("#rGo").addEventListener("click", loadRoutes);
+$("#rQ").addEventListener("keydown", function (e) { if (e.key === "Enter") loadRoutes(); });
+$("#rMode").addEventListener("change", syncRouteSort);
+$("#rSort").addEventListener("change", loadRoutes);
+
+function syncRouteSort() {
+  var sel = $("#rSort"), opts = ROUTE_SORTS[$("#rMode").value] || [];
+  sel.innerHTML = opts.map(function (o) {
+    return '<option value="' + esc(o[0]) + '">' + esc(o[1]) + "</option>";
+  }).join("");
+}
+syncRouteSort();
+
+function loadRoutes() {
+  var mode = $("#rMode").value, q = $("#rQ").value.trim();
+  var list = $("#rList");
+  list.innerHTML = '<div class="empty"><span class="spin"></span></div>';
+  $("#rCount").textContent = "Loading…";
+  // The interesting sorts are all "most X", so those read best descending.
+  var sort = $("#rSort").value;
+  var desc = sort === "stop_count" || sort === "trip_count" || sort === "avg_trip_minutes";
+  api("/" + mode.toLowerCase() + "/routes", { query: { q: q, sort: sort, order: desc ? "desc" : "asc", limit: 200 } }).then(function (res) {
+    if (!res.ok || !res.json || !res.json.data) {
+      $("#rCount").textContent = ""; list.innerHTML = '<div class="empty">Could not load routes.</div>';
+      return;
+    }
+    var d = res.json.data, items = d.items || d.routes || [];
+    var page = d.page || {};
+    var total = page.total != null ? page.total : items.length;
+    $("#rCount").textContent = "Showing " + items.length + " of " + total + (q ? ' matching "' + q + '"' : "") + " · " + mode.toLowerCase();
+    if (!items.length) { list.innerHTML = '<div class="empty"><b>No route matched</b>Try a different number, or clear the filter.</div>'; return; }
+    list.innerHTML = items.map(function (r) {
+      var c = modeColor(r.mode || mode);
+      var bits = [];
+      if (r.stopCount != null) bits.push(r.stopCount + (mode === "METRO" ? " stations" : " stops"));
+      if (r.averageTripMinutes != null) bits.push(r.averageTripMinutes + " min end to end");
+      if (mode === "METRO" && r.stationsWithTimetable != null) bits.push(r.stationsWithTimetable + " with printed times");
+      if (r.depot) bits.push(r.depot);
+      if (r.hasTimetable) bits.push("timetable");
+      var sub = mode === "METRO" && r.name ? r.name + " · " : "";
+      return '<button class="rowitem" style="--m:' + c + '" data-no="' + esc(r.routeNo) + '">' +
+        '<span class="rt--lg">' + esc(r.routeNo) + "</span>" +
+        '<span style="flex:1;min-width:0"><span class="rowitem__t">' + esc(r.firstStop || "") + (r.lastStop ? " → " + esc(r.lastStop) : "") + "</span>" +
+        '<span class="rowitem__s">' + esc(sub + (r.operator || "")) + (bits.length ? " · " + esc(bits.join(" · ")) : "") + "</span></span>" +
+        '<span class="pill">Open</span></button>';
+    }).join("");
+    Array.prototype.forEach.call(list.querySelectorAll(".rowitem"), function (b) {
+      b.addEventListener("click", function () { routeDetail(b.dataset.no, mode); });
+    });
+  });
+}
+
+function routeDetail(no, mode) {
+  var host = $("#rDetail");
+  host.innerHTML = '<div class="card"><span class="spin"></span></div>';
+  var p = "/" + mode.toLowerCase() + "/routes/" + encodeURIComponent(no);
+
+  api(p).then(function (r) {
+    if (!r.ok || !r.json || !r.json.data) { host.innerHTML = ""; return errBox(host, "Route not found", r); }
+    var d = r.json.data;
+    if (mode === "METRO") return paintMetroRoute(host, d, no);
+    return paintBusRoute(host, d, p, no);
+  });
+}
+
+/** The summary card shown above both stop lists. */
+function routeHead(d, mode, no) {
+  var bits = [];
+  if (d.operator) bits.push(d.operator);
+  if (d.depot) bits.push(d.depot);
+  if (d.vehicleType) bits.push(d.vehicleType);
+  if (d.stopCount != null) bits.push(d.stopCount + (mode === "METRO" ? " stations" : " stops"));
+  if (d.averageTripMinutes != null) bits.push(d.averageTripMinutes + " min end to end");
+  if (mode === "METRO" && d.stationsWithTimetable != null) {
+    bits.push(d.stationsWithTimetable + " of " + d.stopCount + " with printed times");
+  }
+
+  return '<div class="card card--pad"><div class="leg" style="margin-bottom:8px">' +
+    '<span class="mode">' + esc(d.mode || mode) + '</span><span class="rt" style="font-size:30px">' + esc(d.routeNo || no) + "</span>" +
+    '<span class="tag ' + (d.hasTimetable ? "tag--yes" : "tag--no") + '">' + (d.hasTimetable ? "timetable" : "no timetable") + "</span></div>" +
+    (mode === "METRO" && d.name ? '<div style="font-size:15px;font-weight:500">' + esc(d.name) + "</div>" : "") +
+    (d.firstStop ? '<div style="font-size:15px;font-weight:500">' + esc(d.firstStop) + (d.lastStop ? " <span style='color:var(--faint)'>→</span> " + esc(d.lastStop) : "") + "</div>" : "") +
+    (bits.length ? '<div class="stop__meta" style="margin-top:4px">' + esc(bits.join(" · ")) + "</div>" : "") +
+    (mode === "METRO" && d.coverageNote ? '<div class="note" style="margin-top:10px;font-size:12.5px">' + esc(d.coverageNote) + "</div>" : "") +
+    (mode === "METRO" && d.serviceDays && d.serviceDays.length ? '<div class="stop__meta" style="margin-top:6px">Timetables supplied for ' + esc(d.serviceDays.join(", ").toLowerCase()) + " service</div>" : "") +
+    "</div>";
+}
+
+/** Bus stops carry a depot, and trips hang off the route itself. */
+function paintBusRoute(host, d, p, no) {
+  if (Array.isArray(d.stops)) return paintBusStops(host, d, p, no, d.stops);
+  api(p + "/stops").then(function (sr) {
+    paintBusStops(host, d, p, no, (sr.ok && sr.json && sr.json.data && sr.json.data.stops) || []);
+  });
+}
+
+function paintBusStops(host, d, p, no, stops) {
+  var stopCard = '<div class="card card--pad"><div class="sect" style="margin-top:0">Stops</div>' +
+    (stops.length
+      ? '<div class="scroll"><table class="tt"><thead><tr><th>#</th><th>Stop</th><th>Depot</th></tr></thead><tbody>' +
+        stops.map(function (s, i) {
+          var nm = typeof s === "string" ? s : (s.stopName || s.stop_name || s.name || "");
+          var dp = typeof s === "string" ? "" : (s.depot || "");
+          return '<tr><td class="mono">' + (i + 1) + '</td><td class="mono">' + esc(nm) + "</td>" +
+            '<td class="mono" style="color:var(--faint)">' + esc(dp) + "</td></tr>";
+        }).join("") + "</tbody></table></div>"
+      : '<div class="empty">No stop list returned.</div>') + "</div>";
+
+  var ttCard = '<div class="card card--pad"><div class="sect" style="margin-top:0">Timetable</div><div id="ttBox">' +
+    (d.hasTimetable ? '<span class="spin"></span>' : '<div class="empty">This route has no scheduled trips in the source data.</div>') + "</div></div>";
+  host.innerHTML = routeHead(d, "BUS", no) + stopCard + ttCard;
+
+  if (!d.hasTimetable) return;
+  api(p + "/timetable", { query: { limit: 100 } }).then(function (tr) {
+    var box = $("#ttBox"); if (!box) return;
+    if (!tr.ok || !tr.json || !tr.json.data) { box.innerHTML = '<div class="empty">Could not load the timetable.</div>'; return; }
+    var td = tr.json.data, trips = td.items || [];
+    if (!trips.length) { box.innerHTML = '<div class="empty">No scheduled trips found.</div>'; return; }
+    var pg = td.page || {};
+    var rows = trips.map(function (t) {
+      return '<tr><td class="mono">' + esc(t.tripNo != null ? t.tripNo : "—") + "</td>" +
+        '<td class="mono">' + esc(t.operator || "—") + "</td>" +
+        '<td class="mono">' + esc(t.directionId != null ? t.directionId : "—") + "</td>" +
+        '<td class="mono">' + esc(t.departureTime || "—") + "</td>" +
+        '<td class="mono">' + esc(t.arrivalTime || "—") + "</td>" +
+        '<td class="mono">' + esc(t.durationMinutes != null ? t.durationMinutes + " min" : "—") + "</td></tr>";
+    }).join("");
+    var via = (td.resolvedRouteNos || []).filter(function (x) { return x !== td.requestedRouteNo; });
+    box.innerHTML = '<p class="hint" style="margin:0 0 10px">' + (pg.total != null ? pg.total + " trips · " : "") + "showing " + trips.length +
+      (via.length ? " · resolved via " + esc(via.join(", ")) : "") + "</p>" +
+      '<div class="scroll"><table class="tt"><thead><tr><th>Trip</th><th>Operator</th><th>Dir</th><th>Departs</th><th>Arrives</th><th>Duration</th></tr></thead><tbody>' +
+      rows + "</tbody></table></div>";
+  });
+}
+
+/**
+ * Metro stations carry a printed-time flag instead of a depot, and the trips
+ * hang off the line rather than the route, so both lists are built separately.
+ */
+function paintMetroRoute(host, d, no) {
+  if (Array.isArray(d.stops)) return paintMetroStations(host, d, no, d.stops);
+  api("/metro/stations", { query: { line: d.routeId || no, limit: 500 } }).then(function (sr) {
+    var list = sr.ok && sr.json && sr.json.data ? (sr.json.data.items || sr.json.data.stations) : null;
+    paintMetroStations(host, d, no, list || []);
+  });
+}
+
+function paintMetroStations(host, d, no, stops) {
+  var stopCard = '<div class="card card--pad"><div class="sect" style="margin-top:0">Stations</div>' +
+    (stops.length
+      ? '<div class="scroll"><table class="tt"><thead><tr><th>#</th><th>Station</th><th>Code</th><th>Times</th></tr></thead><tbody>' +
+        stops.map(function (s, i) {
+          var nm = typeof s === "string" ? s : (s.name || s.stationName || "");
+          var code = typeof s === "string" ? "" : (s.stationCode || "");
+          var timed = typeof s === "string" ? true : s.hasTimetable !== false;
+          return '<tr><td class="mono">' + (i + 1) + '</td><td class="mono">' + esc(nm) + "</td>" +
+            '<td class="mono" style="color:var(--faint)">' + esc(code || "—") + "</td>" +
+            '<td class="mono" style="color:var(--faint)">' + (timed ? "printed" : "map only") + "</td></tr>";
+        }).join("") + "</tbody></table></div>"
+      : '<div class="empty">No station list returned.</div>') + "</div>";
+
+  var ttCard = '<div class="card card--pad"><div class="sect" style="margin-top:0">Trips</div><div id="ttBox">' +
+    (d.hasTimetable ? '<span class="spin"></span>' : '<div class="empty">No timetable was supplied for this line, so journey times on it are static estimates.</div>') + "</div></div>";
+  host.innerHTML = routeHead(d, "METRO", no) + stopCard + ttCard;
+
+  if (!d.hasTimetable) return;
+  api("/metro/routes/" + encodeURIComponent(d.routeId || no) + "/trips", { query: { limit: 100 } }).then(function (tr) {
+    var box = $("#ttBox"); if (!box) return;
+    if (!tr.ok || !tr.json || !tr.json.data) { box.innerHTML = '<div class="empty">Could not load the timetable.</div>'; return; }
+    var td = tr.json.data, trips = td.items || [];
+    if (!trips.length) { box.innerHTML = '<div class="empty">No trips found.</div>'; return; }
+    var pg = td.page || {};
+    var rows = trips.map(function (t) {
+      return '<tr><td class="mono">' + esc(t.trainNo || t.tripId || "—") + "</td>" +
+        '<td class="mono">' + esc(t.serviceDay || "—") + "</td>" +
+        '<td class="mono">' + esc(t.direction || "—") + "</td>" +
+        '<td class="mono">' + esc(t.origin || "—") + " → " + esc(t.destination || "—") + "</td>" +
+        '<td class="mono">' + esc(t.departureTime || "—") + " – " + esc(t.arrivalTime || "—") + "</td>" +
+        '<td class="mono">' + esc(t.durationMinutes != null ? t.durationMinutes + " min" : "—") + "</td></tr>";
+    }).join("");
+    box.innerHTML = '<p class="hint" style="margin:0 0 10px">' + (pg.total != null ? pg.total + " trips · " : "") + "showing " + trips.length + "</p>" +
+      '<div class="scroll"><table class="tt"><thead><tr><th>Train</th><th>Day</th><th>Dir</th><th>Run</th><th>Times</th><th>Duration</th></tr></thead><tbody>' +
+      rows + "</tbody></table></div>";
+  });
+}
+
+/* ============================ stops ============================ */
+$("#sGo").addEventListener("click", loadStops);
+$("#sQ").addEventListener("keydown", function (e) { if (e.key === "Enter") loadStops(); });
+
+function loadStops() {
+  var q = $("#sQ").value.trim(), mode = $("#sMode").value;
+  if (!q) return;
+  var list = $("#sList");
+  list.innerHTML = '<div class="empty"><span class="spin"></span></div>';
+  $("#sCount").textContent = "Searching…";
+  api("/search", { query: { q: q, mode: mode, limit: 50 } }).then(function (res) {
+    if (!res.ok || !res.json || !res.json.data) { $("#sCount").textContent = ""; list.innerHTML = '<div class="empty">Search failed.</div>'; return; }
+    var results = res.json.data.results || [];
+    $("#sCount").textContent = results.length + (results.length === 1 ? " stop" : " stops") + ' for "' + q + '"';
+    if (!results.length) { list.innerHTML = '<div class="empty"><b>No stop matched</b>Check the spelling, or search a nearby landmark.</div>'; return; }
+    list.innerHTML = results.map(function (r) {
+      return '<button class="rowitem" style="--m:' + modeColor(r.modes && r.modes[0]) + '" data-name="' + esc(r.name) + '">' +
+        '<span><span class="rowitem__t">' + esc(r.name) + "</span>" +
+        '<span class="rowitem__s">' + esc((r.modes || []).join(" + ")) + (r.operator ? " · " + esc(r.operator) : "") + "</span></span>" +
+        '<span class="pill">' + (r.routeCount != null ? r.routeCount + " routes" : "") + "</span></button>";
+    }).join("");
+    Array.prototype.forEach.call(list.querySelectorAll(".rowitem"), function (b) {
+      b.addEventListener("click", function () {
+        $("#from").value = b.dataset.name;
+        TABS[0][1]();
+        Array.prototype.forEach.call(document.querySelectorAll(".tab"), function (x, i) { if (i === 0) x.click(); });
+        $("#to").focus();
+      });
+    });
+  });
+}
+
+/* ============================ network ============================ */
+function loadNetwork() {
+  if ($("#modesList").dataset.done) return;
+  $("#modesList").dataset.done = "1";
+
+  api("/health").then(function (r) {
+    var m = (r.json && r.json.data && r.json.data.modes) || {};
+    var order = ["BUS", "METRO", "FERRY"];
+    $("#modesList").innerHTML = order.map(function (k) {
+      var d = m[k] || {};
+      var on = d.implemented === true;
+      return '<div class="rowitem" style="--m:' + modeColor(k) + ';cursor:default">' +
+        '<span class="rt--lg">' + k + "</span>" +
+        '<span><span class="rowitem__t">' + (on ? "Available" : "Not in this build") + "</span>" +
+        '<span class="rowitem__s">' + esc(d.reason || d.dataSource || "") + "</span></span>" +
+        '<span class="pill"><span class="tag ' + (on ? "tag--yes" : "tag--no") + '">' + (on ? "live" : "not served") + "</span></span></div>";
+    }).join("");
+  });
+
+  api("/graph/stats").then(function (r) {
+    var d = (r.json && r.json.data) || {};
+    var g = d.stats || d.graph || d;
+    var order = ["nodeCount", "edgeCount", "rideEdgeCount", "transferEdgeCount", "routeCount", "busRouteCount", "metroLineCount", "metroLinesWithoutTimetable", "routesWithRealTimings", "routesOnStaticEstimate", "placeholderStopsExcluded"];
+    var shown = order.filter(function (k) { return g[k] !== undefined; });
+    if (!shown.length) {
+      Object.keys(g).forEach(function (k) { if (typeof g[k] === "number" || typeof g[k] === "string") shown.push(k); });
+    }
+    $("#graphList").innerHTML = shown.map(function (k) {
+      return '<div class="rowitem" style="--m:var(--accent);cursor:default"><span style="flex:1">' + esc(k.replace(/([A-Z])/g, " $1").toLowerCase()) +
+        '</span><span class="rt--lg">' + esc(g[k]) + "</span></div>";
+    }).join("") || '<div class="empty">No graph data.</div>';
+
+    var byMode = g.nodesByMode || {};
+    var modes = Object.keys(byMode).map(function (k) { return kv(k + " stops", byMode[k]); }).join("");
+    var det = g.transferDetection || {};
+    var det2 = Object.keys(det).filter(function (k) { return typeof det[k] === "number"; })
+      .map(function (k) { return kv(k.replace(/([A-Z])/g, " $1").toLowerCase(), det[k]); }).join("");
+    var reasons = g.transferReasons || {};
+    var rsn = Object.keys(reasons).map(function (k) { return kv(k.replace(/_/g, " ").toLowerCase(), reasons[k]); }).join("");
+    $("#graphSide").innerHTML =
+      '<div class="lab">Nodes by mode</div>' + (modes || '<div class="min">—</div>') +
+      '<div class="lab" style="margin-top:16px">Cross-operator timings</div>' +
+      ((g.crossOperatorTimings || []).map(function (x) { return kv("route", x); }).join("") || '<div class="min">none</div>') +
+      '<div class="lab" style="margin-top:16px">Transfer reasons</div>' + (rsn || '<div class="min">—</div>') +
+      '<div class="lab" style="margin-top:16px">Rejected candidates</div>' + (det2 || '<div class="min">—</div>') +
+      kv("build time", (g.buildDurationMs != null ? g.buildDurationMs + " ms" : "—")) +
+      (d.cache ? kv("graph cached", d.cache.built ? (d.cache.stale ? "stale" : "fresh") : "no") : "");
+  });
+
+  api("/graph/transfers", { query: { limit: 200 } }).then(function (r) {
+    var d = (r.json && r.json.data) || {};
+    var t = d.transfers || [];
+    function nm(v) { return v && typeof v === "object" ? v.name : v; }
+    function md(v) { return v && typeof v === "object" && v.mode ? " <span class=\"rowitem__s\">" + esc(v.mode) + "</span>" : ""; }
+    $("#trList").innerHTML =
+      '<div class="rowitem" style="--m:var(--accent);cursor:default"><span style="flex:1">Interchanges detected</span><span class="rt--lg">' + (d.total != null ? d.total : t.length) + "</span></div>" +
+      (t.length ? t.slice(0, 100).map(function (x) {
+        return '<div class="rowitem" style="--m:var(--walk);cursor:default"><span style="flex:1">' + esc(nm(x.from)) + md(x.from) +
+          (x.reason ? ' <span class="rowitem__s">' + esc(x.reason.replace(/_/g, " ").toLowerCase()) + "</span>" : "") + "</span>" +
+          '<span class="pill">' + esc(nm(x.to)) + (x.transferTimeMinutes != null ? " · " + x.transferTimeMinutes + " min" : "") + "</span></div>";
+      }).join("") : '<div class="empty">No interchanges returned.</div>');
+  });
+
+  api("/bus/diagnostics").then(function (r) {
+    var d = (r.json && r.json.data) || {};
+    var html = "";
+    if (d.notes && d.notes.length) {
+      html += d.notes.map(function (n) {
+        return '<div class="rowitem" style="--m:var(--accent);cursor:default;align-items:flex-start">' +
+          '<span style="font:600 10px/1.6 var(--mono);letter-spacing:.1em;color:var(--accent)">NOTE</span>' +
+          "<span style=\"font-size:12.5px;line-height:1.5\">" + esc(typeof n === "string" ? n : (n.message || JSON.stringify(n))) + "</span></div>";
+      }).join("");
+    }
+    var scalar = ["routeStopRows", "distinctRouteNos", "distinctStops", "timetableRows", "timetableRouteNos", "defaultOperator", "databaseConfigured", "configuredAliases"];
+    scalar.forEach(function (k) { if (d[k] !== undefined) html += kv(k.replace(/([A-Z])/g, " $1").toLowerCase(), typeof d[k] === "boolean" ? (d[k] ? "yes" : "no") : d[k]); });
+    if (d.routesWithoutTimetable && d.routesWithoutTimetable.length) html += kv("routes without timetable", d.routesWithoutTimetable.join(", "));
+    if (d.timetableRoutesWithoutStops && d.timetableRoutesWithoutStops.length) html += kv("timetable routes without stops", d.timetableRoutesWithoutStops.join(", "));
+    if (d.duplicateTripKeys) html += kv("duplicate trip keys", typeof d.duplicateTripKeys === "number" ? d.duplicateTripKeys : JSON.stringify(d.duplicateTripKeys).slice(0, 200));
+    if (d.rejections && d.rejections.length) {
+      html += '<div class="rowitem" style="--m:var(--bad);cursor:default"><span style="flex:1">Rejected rows</span><span class="rt--lg">' + d.rejections.length + "</span></div>";
+      html += d.rejections.slice(0, 25).map(function (x) {
+        return '<div class="rowitem" style="--m:var(--bad);cursor:default;align-items:flex-start"><span style="flex:1;font-size:12.5px">' +
+          esc(typeof x === "string" ? x : JSON.stringify(x)) + "</span></div>";
+      }).join("");
+    }
+    var runs = d.importRuns || d.imports || [];
+    html += '<div class="rowitem" style="--m:var(--accent);cursor:default"><span style="flex:1">Import runs</span><span class="rt--lg">' + (Array.isArray(runs) ? runs.length : 0) + "</span></div>";
+    (Array.isArray(runs) ? runs : []).slice(0, 6).forEach(function (run) {
+      Object.keys(run).forEach(function (k) {
+        if (run[k] !== null && typeof run[k] !== "object") html += kv("  " + k.replace(/([A-Z])/g, " $1").toLowerCase(), run[k]);
+      });
+      html += '<div style="height:8px"></div>';
+    });
+    $("#diagList").innerHTML = html || '<div class="empty">No import diagnostics.</div>';
+  });
+
+  // Metro tables are supplied rather than imported, so its diagnostics describe
+  // data coverage instead of import runs.
+  api("/metro/diagnostics").then(function (r) {
+    var d = (r.json && r.json.data) || {};
+    if (!d.counts) return;
+    var html = '<div class="sect" style="margin-top:20px">Metro data</div>';
+    if (d.notes && d.notes.length) {
+      html += d.notes.map(function (n) {
+        return '<div class="rowitem" style="--m:var(--accent);cursor:default;align-items:flex-start">' +
+          '<span style="font:600 10px/1.6 var(--mono);letter-spacing:.1em;color:var(--accent)">NOTE</span>' +
+          "<span style=\"font-size:12.5px;line-height:1.5\">" + esc(typeof n === "string" ? n : (n.message || JSON.stringify(n))) + "</span></div>";
+      }).join("");
+    }
+    var c = d.counts;
+    html += kv("lines", c.lines) + kv("stations", c.stations) +
+      kv("trips", c.trips) + kv("checkpoints", c.checkpoints) +
+      kv("line/stations with a printed time", d.timedLineStations) +
+      kv("distinct names with a printed time", (d.stationsWithTimetable || []).length);
+
+    if (d.lines && d.lines.length) {
+      html += '<div class="scroll" style="margin-top:12px"><table class="tt"><thead><tr><th>Line</th><th>Stations</th><th>Timed</th><th>Map only</th><th>Trips</th></tr></thead><tbody>' +
+        d.lines.map(function (l) {
+          return '<tr><td class="mono">' + esc(l.line) + "</td>" +
+            '<td class="mono">' + esc(l.stations) + "</td>" +
+            '<td class="mono">' + esc(l.stationsWithTimetable) + "</td>" +
+            '<td class="mono">' + esc(l.mapOnlyStations) + "</td>" +
+            '<td class="mono">' + esc(l.trips) + "</td></tr>";
+        }).join("") + "</tbody></table></div>";
+    }
+
+    if (d.hopStats && d.hopStats.length) {
+      html += '<div class="lab" style="margin-top:16px">Measured min/hop</div>' +
+        d.hopStats.map(function (h) {
+          return kv(h.line, Number(h.avgMinutesPerHop).toFixed(2) + " (from " + Number(h.spanCount).toLocaleString() + " spans)");
+        }).join("");
+    }
+    $("#diagList").insertAdjacentHTML("beforeend", html);
+  });
+}
+
+/* ============================ api explorer ============================ */
+var ENDPOINTS = [
+  { g: "Health", m: "GET", p: "/health" },
+  { g: "Journey planner", m: "POST", p: "/journey", body: '{\n  "source": "Esplanade",\n  "destination": "Gariahat",\n  "mode": "ALL",\n  "strategy": "MIN_TIME",\n  "timetableAware": true\n}',
+    q: [["mode", "ALL | BUS | METRO", ""], ["strategy", "MIN_TIME | MIN_INTERCHANGE", ""], ["departureTime", "HH:MM", ""]] },
+  { g: "Journey planner", m: "GET", p: "/graph/stats" },
+  { g: "Journey planner", m: "GET", p: "/graph/transfers", q: [["limit", "number", "100"]] },
+  { g: "Search", m: "GET", p: "/search", q: [["q", "required", "Esplanade"], ["mode", "ALL|BUS|METRO", "ALL"], ["limit", "1-100", "20"]] },
+  { g: "Bus", m: "GET", p: "/bus/routes", q: [["q", "filter", ""], ["operator", "WBTC | CSTC", ""], ["sort", "route_no|stop_count|avg_trip_minutes", "route_no"], ["order", "asc|desc", "asc"], ["limit", "1-500", "50"], ["offset", "number", "0"]] },
+  { g: "Bus", m: "GET", p: "/bus/routes/:routeNo", pv: "routeNo", q: [["routeNo", "path", "AC-3"]] },
+  { g: "Bus", m: "GET", p: "/bus/routes/:routeNo/stops", pv: "routeNo", q: [["routeNo", "path", "AC-3"]] },
+  { g: "Bus", m: "GET", p: "/bus/routes/:routeNo/timetable", pv: "routeNo", q: [["routeNo", "path", "AC-3"], ["operator", "WBTC | CSTC", ""], ["directionId", "0-9", ""], ["from", "HH:MM", ""], ["limit", "1-500", "20"], ["offset", "number", "0"]] },
+  { g: "Bus", m: "GET", p: "/bus/routes/by-number", q: [["routeNo", "required", "AC-3"]] },
+  { g: "Bus", m: "GET", p: "/bus/routes/by-number/stops", q: [["routeNo", "required", "AC-3"]] },
+  { g: "Bus", m: "GET", p: "/bus/routes/by-number/timetable", q: [["routeNo", "required", "AC-3"], ["limit", "1-500", "20"], ["offset", "number", "0"]] },
+  { g: "Bus", m: "GET", p: "/bus/search", q: [["q", "required", "Esplanade"]] },
+  { g: "Bus", m: "GET", p: "/bus/timetable-routes" },
+  { g: "Bus", m: "GET", p: "/bus/diagnostics" },
+  { g: "Metro", m: "GET", p: "/metro/status" },
+  { g: "Metro", m: "GET", p: "/metro/diagnostics" },
+  { g: "Metro", m: "GET", p: "/metro/stations", q: [["line", "BLUE|GREEN|ORANGE|PURPLE|YELLOW|PINK", ""], ["q", "filter", ""], ["limit", "1-500", "100"], ["offset", "number", "0"]] },
+  { g: "Metro", m: "GET", p: "/metro/stations/:stationId", pv: "stationId" },
+  { g: "Metro", m: "GET", p: "/metro/stations/:stationId/timetable", pv: "stationId", q: [["serviceDay", "WEEKDAY|SATURDAY|SUNDAY", ""], ["direction", "UP|DOWN", ""], ["from", "HH:MM", ""], ["limit", "1-500", "20"], ["offset", "number", "0"]] },
+  { g: "Metro", m: "GET", p: "/metro/routes", q: [["q", "filter", ""], ["sort", "line|stop_count|trip_count", "line"], ["order", "asc|desc", "asc"], ["limit", "1-500", "50"], ["offset", "number", "0"]] },
+  { g: "Metro", m: "GET", p: "/metro/routes/:routeId", pv: "routeId", q: [["routeId", "path", "BLUE"]] },
+  { g: "Metro", m: "GET", p: "/metro/routes/:line/trips", pv: "line", q: [["line", "path", "BLUE"], ["serviceDay", "WEEKDAY|SATURDAY|SUNDAY", ""], ["direction", "UP|DOWN", ""], ["from", "HH:MM", ""], ["limit", "1-500", "20"], ["offset", "number", "0"]] },
+  { g: "Metro", m: "GET", p: "/metro/search", q: [["q", "required", "Esplanade"]] },
+  { g: "Retired", m: "GET", p: "/tram/*", q: [["any path", "returns 410", "/tram/routes"]] },
+  { g: "Ferry · not in this build", m: "GET", p: "/ferry/status" },
+  { g: "Ferry · not in this build", m: "GET", p: "/ferry/routes" },
+  { g: "Ferry · not in this build", m: "GET", p: "/ferry/routes/:routeNo", pv: "routeNo" },
+  { g: "Ferry · not in this build", m: "GET", p: "/ferry/routes/:routeNo/stops", pv: "routeNo" },
+  { g: "Ferry · not in this build", m: "GET", p: "/ferry/routes/:routeNo/timetable", pv: "routeNo" },
+  { g: "Admin · key required", m: "GET", p: "/admin/status" },
+  { g: "Admin · key required", m: "GET", p: "/admin/routes/aliases", q: [["mode", "BUS | METRO", ""]], admin: true },
+  { g: "Admin · key required", m: "POST", p: "/admin/routes/alias", admin: true,
+    body: '{\n  "mode": "BUS",\n  "sourceRouteNo": "AC-3",\n  "targetRouteNo": "AC-3B",\n  "note": "same corridor"\n}' },
+  { g: "Admin · key required", m: "POST", p: "/admin/graph/refresh", admin: true, q: [["force", "true | false", "false"]] }
+];
+
+function buildExplorer() {
+  if ($("#apiList").dataset.done) return;
+  $("#apiList").dataset.done = "1";
+  var host = $("#apiList"), lastG = null, i = 0;
+  ENDPOINTS.forEach(function (e) {
+    if (e.g !== lastG) { host.innerHTML += '<div class="sect">' + esc(e.g) + "</div>"; lastG = e.g; }
+    var id = "eg" + (i++);
+    var params = (e.q || []).map(function (p, n) {
+      return '<div class="prm"><label for="' + id + "p" + n + '">' + esc(p[0]) + "</label>" +
+        '<input class="inp" id="' + id + "p" + n + '" value="' + esc(p[2]) + '" placeholder="' + esc(p[1]) + '" data-p="' + esc(p[0]) + '"></div>';
+    }).join("");
+    host.innerHTML +=
+      '<div class="eg" id="' + id + '"><button class="eg__h" type="button">' +
+      '<span class="verb verb--' + e.m.toLowerCase() + '">' + e.m + "</span>" +
+      '<span class="eg__p">/api' + esc(e.p) + "</span></button>" +
+      '<div class="eg__b">' +
+      (params ? '<div class="prms">' + params + "</div>" : '<div class="min">No parameters.</div>') +
+      (e.body ? '<div class="prm"><label>Request body</label><textarea data-body>' + esc(e.body) + "</textarea></div>" : "") +
+      '<div><button class="btn btn--ghost" data-run type="button">Send request</button>' +
+      (e.admin ? ' <span class="min" style="color:var(--accent)">needs admin key above</span>' : "") + "</div>" +
+      '<div class="resp"><pre data-out>Not sent yet.</pre></div>' +
+      "</div></div>";
+  });
+
+  host.addEventListener("click", function (ev) {
+    var eg = ev.target.closest(".eg");
+    if (!eg) return;
+    if (ev.target.closest("[data-run]")) return send(eg);
+    if (ev.target.closest(".eg__h")) eg.dataset.open = eg.dataset.open === "true" ? "false" : "true";
+  });
+
+  $("#aExpand").addEventListener("click", function () {
+    var open = Array.prototype.some.call(host.querySelectorAll(".eg"), function (e) { return e.dataset.open !== "true"; });
+    Array.prototype.forEach.call(host.querySelectorAll(".eg"), function (e) { e.dataset.open = open ? "true" : "false"; });
+  });
+  $("#aKey").addEventListener("input", function () { adminKey = this.value; });
+
+  function send(eg) {
+    var def = ENDPOINTS[+eg.id.slice(2)];
+    if (!def) return;
+    var path = def.p, query = {};
+    Array.prototype.forEach.call(eg.querySelectorAll("[data-p]"), function (inp) {
+      var k = inp.dataset.p;
+      if (k === def.pv) path = path.replace(":" + k, encodeURIComponent(inp.value));
+      else query[k] = inp.value;
+    });
+    var body = null, ta = eg.querySelector("[data-body]");
+    if (ta) { try { body = JSON.parse(ta.value); } catch (e) { var o = eg.querySelector("[data-out]"); o.innerHTML = '<span class="st st--4">body</span>Request body is not valid JSON.'; return; } }
+    var out = eg.querySelector("[data-out]");
+    out.textContent = "Sending…";
+    api(path, { method: def.m, query: query, body: body, admin: def.admin }).then(function (r) {
+      var cls = r.status >= 500 ? "st--5" : r.status >= 400 ? "st--4" : "st--2";
+      var txt = r.json ? JSON.stringify(r.json, null, 2) : r.text;
+      if (txt && txt.length > 60000) txt = txt.slice(0, 60000) + "\n… truncated";
+      out.innerHTML = '<span class="st ' + cls + '">' + r.status + " " + (r.status === 0 ? "no response" : r.ok ? "ok" : "error") + "</span>" +
+        '<span style="color:var(--faint)">' + esc(r.url) + "</span>\n" + esc(txt);
+    });
+  }
+}
+
+/* ============================ settings ============================ */
+var dlg = $("#cfg");
+function openCfg() { $("#cfgBase").value = base; $("#cfgMsg").textContent = ""; if (dlg.showModal) dlg.showModal(); else dlg.setAttribute("open", ""); }
+$("#cfgBtn").addEventListener("click", openCfg);
+$("#baseChip").addEventListener("click", openCfg);
+$("#cfgTest").addEventListener("click", function () {
+  var v = $("#cfgBase").value.trim().replace(/\/+$/, "");
+  $("#cfgMsg").innerHTML = '<span class="spin"></span> Testing';
+  fetch(v.replace(/\/+$/, "") + "/health").then(function (r) { return r.text().then(function (t) {
+    var ok = r.ok;
+    $("#cfgMsg").innerHTML = ok
+      ? '<span class="ok-note">Reachable · HTTP ' + r.status + "</span>"
+      : '<span style="color:var(--bad)">HTTP ' + r.status + " · " + esc(t.slice(0, 120)) + "</span>";
+  }); }).catch(function (e) { $("#cfgMsg").innerHTML = '<span style="color:var(--bad)">' + esc(String(e.message || e)) + "</span>"; });
+});
+$("#cfgSave").addEventListener("click", function () {
+  var v = $("#cfgBase").value.trim().replace(/\/+$/, "");
+  if (!v) return;
+  base = v;
+  try { localStorage.setItem(LS, v); } catch (e) {}
+  if (dlg.close) dlg.close(); else dlg.removeAttribute("open");
+  paintBase();
+  health();
+  loadRoutes();
+});
+
+/* ============================ boot ============================ */
+function paintBase() {
+  var el = $("#baseChip");
+  if (!el) return;
+  var host = base;
+  try { host = new URL(base).host; } catch (e) {}
+  el.textContent = "api: " + host;
+}
+resolveBase().then(function (b) {
+  base = b;
+  paintBase();
+  health();
+  loadRoutes();
+});
+setInterval(health, 30000);
+</script>
+</body>
+</html>

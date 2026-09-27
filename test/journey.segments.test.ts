@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createRouteStatsLookup, TransportGraph, type TransportGraphData } from "../src/graph/transport.graph.js";
 import { findPath } from "../src/graph/pathfinder.js";
-import { JourneyService } from "../src/services/journey.service.js";
+import type { RideEdge } from "../src/graph/graph.edge.js";
+import { JourneyService, type TimetableIndex } from "../src/services/journey.service.js";
 import type { RouteTripStatsRow } from "../src/models/bus.model.js";
 import type { GraphEdge, GraphNode, JourneySegment } from "../src/types/transport.js";
 import { normalizeStopName } from "../src/utils/normalize.js";
@@ -80,7 +81,7 @@ function rideEdge(
   minutes: number,
   routeNo: string,
   routeId = `bus:wbtc:route:${routeNo.toLowerCase()}`,
-): GraphEdge {
+): RideEdge {
   return {
     fromNodeId: from,
     toNodeId: to,
@@ -130,7 +131,8 @@ function makeGraph(edges: GraphEdge[]): TransportGraph {
       transferEdgeCount: 0,
       routeCount: 2,
       busRouteCount: 2,
-      tramRouteCount: 0,
+      metroLineCount: 0,
+      metroLinesWithoutTimetable: [],
       nodesByMode: {},
       routesWithRealTimings: 0,
       routesOnStaticEstimate: 2,
@@ -142,6 +144,7 @@ function makeGraph(edges: GraphEdge[]): TransportGraph {
         distanceChecks: 0,
         rejectedByDistance: 0,
         rejectedBySimilarity: 0,
+        rejectedSameSystem: 0,
       },
       transferReasons: {},
       buildDurationMs: 0,
@@ -154,8 +157,18 @@ function makeGraph(edges: GraphEdge[]): TransportGraph {
 type SegmentBuilder = (
   graph: TransportGraph,
   result: ReturnType<typeof findPath>,
-  context: { timetable: unknown; requestMinutes: number | null; warnings: string[] },
+  context: { timetable: TimetableIndex; requestMinutes: number | null; warnings: string[] },
 ) => { segments: JourneySegment[]; clockMinutes: number[] };
+
+/** No real timetable data, so every leg falls back to the graph estimate. */
+function emptyTimetable(): TimetableIndex {
+  return {
+    byRouteNo: new Map(),
+    unresolvedRoutes: [],
+    metroByLeg: new Map(),
+    metroLinesWithoutTimetable: [],
+  };
+}
 
 /** Reaches the private segmentation step, which is the unit under test. */
 const journeyService = new JourneyService();
@@ -177,7 +190,7 @@ describe("journey segmentation", () => {
     expect(path.found).toBe(true);
 
     const { segments } = buildSegments(graph, path, {
-      timetable: { byRouteNo: new Map(), unresolvedRoutes: [] },
+      timetable: emptyTimetable(),
       requestMinutes: null,
       warnings: [],
     });
@@ -203,7 +216,7 @@ describe("journey segmentation", () => {
     ]);
     const path = findPath(graph, "A", "C");
     const { segments } = buildSegments(graph, path, {
-      timetable: { byRouteNo: new Map(), unresolvedRoutes: [] },
+      timetable: emptyTimetable(),
       requestMinutes: null,
       warnings: [],
     });
@@ -227,7 +240,7 @@ describe("journey segmentation", () => {
     const graph = makeGraph([rideEdge("A", "B", 7, "E-26"), rideEdge("B", "C", 7, "E-26")]);
     const path = findPath(graph, "A", "C");
     const { segments } = buildSegments(graph, path, {
-      timetable: { byRouteNo: new Map(), unresolvedRoutes: [] },
+      timetable: emptyTimetable(),
       requestMinutes: null,
       warnings: [],
     });
@@ -245,7 +258,7 @@ describe("journey segmentation", () => {
     ]);
     const path = findPath(graph, "A", "D");
     const { segments } = buildSegments(graph, path, {
-      timetable: { byRouteNo: new Map(), unresolvedRoutes: [] },
+      timetable: emptyTimetable(),
       requestMinutes: null,
       warnings: [],
     });
@@ -261,7 +274,7 @@ describe("journey segmentation", () => {
     ]);
     const path = findPath(graph, "A", "D");
     const { segments } = buildSegments(graph, path, {
-      timetable: { byRouteNo: new Map(), unresolvedRoutes: [] },
+      timetable: emptyTimetable(),
       requestMinutes: null,
       warnings: [],
     });

@@ -1,7 +1,11 @@
 import { getAllBusStops, getAllRouteTripStats } from "../repositories/bus.repository.js";
-import { getAllTramStops } from "../repositories/tram.repository.js";
+import {
+  getAllMetroStations,
+  getMetroHopStats,
+  METRO_OPERATOR,
+} from "../repositories/metro.repository.js";
 import type { BusRouteStopRow, RouteTripStatsRow } from "../models/bus.model.js";
-import type { TramRouteStopRow } from "../models/tram.model.js";
+import type { MetroHopStatsRow } from "../models/metro.model.js";
 import type { GraphEdge, GraphNode, TransportMode } from "../types/transport.js";
 import { buildRouteNodeId, buildStopNodeId, normalizeStopName } from "../utils/normalize.js";
 import { createRideEdges, createTransferEdge, isTransferEdge } from "./graph.edge.js";
@@ -49,7 +53,9 @@ export interface GraphStats {
   transferEdgeCount: number;
   routeCount: number;
   busRouteCount: number;
-  tramRouteCount: number;
+  metroLineCount: number;
+  /** Lines with no supplied timetable, riding on a static per-hop estimate. */
+  metroLinesWithoutTimetable: string[];
   nodesByMode: Record<string, number>;
   routesWithRealTimings: number;
   routesOnStaticEstimate: number;
@@ -85,8 +91,7 @@ export interface TransportGraphData {
  */
 const STATIC_FALLBACK_HOP_MINUTES: Record<TransportMode, number> = {
   BUS: 3,
-  TRAM: 3,
-  METRO: 2,
+  METRO: 3,
   FERRY: 10,
 };
 
@@ -216,6 +221,14 @@ interface RouteSeed {
   mode: TransportMode;
   stopNames: string[];
   averageTripMinutes: number | null;
+  /**
+   * Real minutes per hop, when the source supplies per-station times.
+   *
+   * For Metro this is measured between consecutive printed times inside a run
+   * rather than derived from an average trip duration, because the Metro source
+   * mixes full-length runs with short-turns.
+   */
+  minutesPerHop?: number;
 }
 
 /**
@@ -281,11 +294,16 @@ export function createRouteStatsLookup(stats: RouteTripStatsRow[]): {
 export async function buildTransportGraph(options: BuildGraphOptions = {}): Promise<TransportGraph> {
   const startedAt = Date.now();
 
-  const [busStops, tramStops, routeStats] = await Promise.all([
+  const [busStops, metroStations, routeStats, metroHopStats] = await Promise.all([
     getAllBusStops(),
-    getAllTramStops(),
+    getAllMetroStations(),
     getAllRouteTripStats("BUS").catch(() => [] as RouteTripStatsRow[]),
+    // A failure here must not cost the bus graph, so Metro falls back to its
+    // static hop time rather than failing the whole build.
+    getMetroHopStats().catch(() => [] as MetroHopStatsRow[]),
   ]);
+
+  const hopByLine = new Map(metroHopStats.map((row) => [row.line, row.avg_minutes_per_hop]));
 
   const nodes = new Map<string, GraphNode>();
   const byStopName = new Map<string, GraphNode[]>();
@@ -313,19 +331,22 @@ export async function buildTransportGraph(options: BuildGraphOptions = {}): Prom
     }
   }
 
-  const tramSeeds = new Map<string, RouteSeed>();
-  for (const row of tramStops) {
-    const key = `${row.operator}|${row.route_no}`;
-    const seed = tramSeeds.get(key);
+  // Metro "routes" are lines. `metro_stations.station_sequence` is the supplied
+  // 1-based line order and is contiguous, so grouping by line and trusting that
+  // order needs no reversal guesswork.
+  const metroSeeds = new Map<string, RouteSeed>();
+  for (const row of metroStations) {
+    const seed = metroSeeds.get(row.line);
     if (seed) {
-      seed.stopNames.push(row.stop_name);
+      seed.stopNames.push(row.station_name);
     } else {
-      tramSeeds.set(key, {
-        routeNo: row.route_no,
-        operator: row.operator,
-        mode: "TRAM",
-        stopNames: [row.stop_name],
+      metroSeeds.set(row.line, {
+        routeNo: row.line,
+        operator: METRO_OPERATOR,
+        mode: "METRO",
+        stopNames: [row.station_name],
         averageTripMinutes: null,
+        minutesPerHop: hopByLine.get(row.line),
       });
     }
   }
@@ -335,11 +356,11 @@ export async function buildTransportGraph(options: BuildGraphOptions = {}): Prom
     if (stat) seed.averageTripMinutes = stat.avg_trip_minutes;
   }
 
-  const allSeeds = [...busSeeds.values(), ...tramSeeds.values()];
+  const allSeeds = [...busSeeds.values(), ...metroSeeds.values()];
 
   // ---- derive per-hop minutes ----------------------------------------------
   const hopMinutesByMode = new Map<TransportMode, number | null>();
-  for (const mode of ["BUS", "TRAM"] as TransportMode[]) {
+  for (const mode of ["BUS", "METRO"] as TransportMode[]) {
     const samples: number[] = [];
     for (const seed of allSeeds) {
       if (seed.mode !== mode) continue;
@@ -398,7 +419,12 @@ export async function buildTransportGraph(options: BuildGraphOptions = {}): Prom
 
     let minutesPerHop: number;
     let timeSource: RouteInfo["timeSource"];
-    if (seed.averageTripMinutes !== null && seed.averageTripMinutes > 0) {
+    if (seed.minutesPerHop !== undefined && seed.minutesPerHop > 0) {
+      // Metro: measured directly between consecutive printed times.
+      minutesPerHop = seed.minutesPerHop;
+      timeSource = "TIMETABLE_AVERAGE";
+      routesWithRealTimings += 1;
+    } else if (seed.averageTripMinutes !== null && seed.averageTripMinutes > 0) {
       minutesPerHop = seed.averageTripMinutes / totalHops;
       timeSource = "TIMETABLE_AVERAGE";
       routesWithRealTimings += 1;
@@ -495,7 +521,10 @@ export async function buildTransportGraph(options: BuildGraphOptions = {}): Prom
     transferEdgeCount,
     routeCount: routes.size,
     busRouteCount: busSeeds.size,
-    tramRouteCount: tramSeeds.size,
+    metroLineCount: metroSeeds.size,
+    metroLinesWithoutTimetable: [...metroSeeds.entries()]
+      .filter(([, seed]) => seed.minutesPerHop === undefined)
+      .map(([line]) => line),
     nodesByMode,
     routesWithRealTimings,
     routesOnStaticEstimate,
@@ -536,5 +565,5 @@ export function findRoutesByNumber(graph: TransportGraph, routeNo: string): Rout
   return matches;
 }
 
-export type { BusRouteStopRow, TramRouteStopRow };
+export type { BusRouteStopRow };
 export { buildStopNodeId };
