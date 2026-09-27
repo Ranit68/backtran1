@@ -94,6 +94,12 @@ function edgeAllowed(edge: GraphEdge, graph: TransportGraph, modes: "ALL" | Tran
 
 interface QueueEntry {
   nodeId: string;
+  /**
+   * Line of the ride that arrived here, or undefined after a transfer edge.
+   * Part of the search state: the cost of the next edge depends on whether it
+   * continues the current ride or changes lines.
+   */
+  lastRouteId: string | undefined;
   cost: number;
 }
 
@@ -145,6 +151,18 @@ class MinHeap {
   }
 }
 
+/**
+ * A search state is a node plus the line the traveller arrived on.
+ *
+ * Arriving at the same station on two different lines gives two different
+ * distances, because changing lines afterwards costs an interchange. Keying the
+ * search on the node alone would collapse them and let the search "teleport"
+ * between lines for free.
+ */
+function stateKey(nodeId: string, lastRouteId: string | undefined): string {
+  return `${nodeId}\u0000${lastRouteId ?? ""}`;
+}
+
 export function findPath(
   graph: TransportGraph,
   fromNodeId: string,
@@ -171,24 +189,26 @@ export function findPath(
     return { found: true, steps: [], totalTimeMinutes: 0, transfers: 0, nodesExplored: 0 };
   }
 
-  const gScore = new Map<string, number>([[fromNodeId, 0]]);
-  const cameFrom = new Map<string, { nodeId: string; edge: GraphEdge }>();
+  const startKey = stateKey(fromNodeId, undefined);
+  const gScore = new Map<string, number>([[startKey, 0]]);
+  const cameFrom = new Map<string, { stateKey: string; nodeId: string; edge: GraphEdge }>();
   const open = new MinHeap();
   const closed = new Set<string>();
 
-  open.push({ nodeId: fromNodeId, cost: heuristic(graph, fromNodeId, toNodeId) });
+  open.push({ nodeId: fromNodeId, lastRouteId: undefined, cost: heuristic(graph, fromNodeId, toNodeId) });
 
   let nodesExplored = 0;
   let searchLimitHit = false;
 
   while (open.size > 0) {
     const current = open.pop()!;
-    if (closed.has(current.nodeId)) continue;
-    closed.add(current.nodeId);
+    const currentKey = stateKey(current.nodeId, current.lastRouteId);
+    if (closed.has(currentKey)) continue;
+    closed.add(currentKey);
     nodesExplored += 1;
 
     if (current.nodeId === toNodeId) {
-      return reconstruct(graph, cameFrom, fromNodeId, toNodeId, nodesExplored);
+      return reconstruct(graph, cameFrom, currentKey, fromNodeId, nodesExplored);
     }
 
     if (nodesExplored >= maxExpansions) {
@@ -196,21 +216,40 @@ export function findPath(
       break;
     }
 
-    const currentG = gScore.get(current.nodeId)!;
+    const currentG = gScore.get(currentKey)!;
 
     for (const edge of graph.neighbours(current.nodeId)) {
       if (!edgeAllowed(edge, graph, modes)) continue;
 
       const time = edgeTimeMinutes(edge);
-      const cost = time + (isTransferEdge(edge) ? penalty : 0);
-      const tentative = currentG + cost;
+      let cost = time;
+      if (isTransferEdge(edge)) {
+        cost += penalty;
+      } else if (current.lastRouteId !== undefined && current.lastRouteId !== edge.routeId) {
+        // Changing lines still costs an interchange even when no TRANSFER edge
+        // is involved, because the traveller gets off one vehicle and waits for
+        // the next. The journey planner charges for exactly this when it builds
+        // the segments, so the search has to price it too. Without this the
+        // search treats every line as free to hop onto for a single hop, and
+        // then bills the traveller 5 minutes per change afterwards.
+        cost += penalty;
+      }
 
-      const known = gScore.get(edge.toNodeId);
+      const tentative = currentG + cost;
+      // A transfer edge ends the current ride, so the next one starts fresh.
+      const nextRouteId = isTransferEdge(edge) ? undefined : edge.routeId;
+      const nextKey = stateKey(edge.toNodeId, nextRouteId);
+
+      const known = gScore.get(nextKey);
       if (known !== undefined && tentative >= known) continue;
 
-      gScore.set(edge.toNodeId, tentative);
-      cameFrom.set(edge.toNodeId, { nodeId: current.nodeId, edge });
-      open.push({ nodeId: edge.toNodeId, cost: tentative + heuristic(graph, edge.toNodeId, toNodeId) });
+      gScore.set(nextKey, tentative);
+      cameFrom.set(nextKey, { stateKey: currentKey, nodeId: current.nodeId, edge });
+      open.push({
+        nodeId: edge.toNodeId,
+        lastRouteId: nextRouteId,
+        cost: tentative + heuristic(graph, edge.toNodeId, toNodeId),
+      });
     }
   }
 
@@ -226,15 +265,15 @@ export function findPath(
 
 function reconstruct(
   graph: TransportGraph,
-  cameFrom: Map<string, { nodeId: string; edge: GraphEdge }>,
+  cameFrom: Map<string, { stateKey: string; nodeId: string; edge: GraphEdge }>,
+  toStateKey: string,
   fromNodeId: string,
-  toNodeId: string,
   nodesExplored: number,
 ): PathResult {
   const steps: PathStep[] = [];
-  let cursor = toNodeId;
+  let cursor: string | undefined = toStateKey;
 
-  while (cursor !== fromNodeId) {
+  while (cursor !== undefined) {
     const previous = cameFrom.get(cursor);
     if (!previous) {
       return {
@@ -246,18 +285,21 @@ function reconstruct(
         reason: "NO_PATH",
       };
     }
-    steps.push({
-      edge: previous.edge,
-      fromNodeId: previous.nodeId,
-      toNodeId: cursor,
-    });
-    cursor = previous.nodeId;
+    steps.push({ edge: previous.edge, fromNodeId: previous.nodeId, toNodeId: previous.edge.toNodeId });
+    if (previous.nodeId === fromNodeId) break;
+    cursor = previous.stateKey;
   }
 
   steps.reverse();
 
   const totalTimeMinutes = steps.reduce((sum, step) => sum + edgeTimeMinutes(step.edge), 0);
-  const transfers = steps.filter((step) => isTransferEdge(step.edge)).length;
+  // An interchange is either an explicit transfer edge or a change of line, so
+  // both are counted. This is what the planner reports to the caller.
+  const transfers = steps.filter((step, index) => {
+    if (isTransferEdge(step.edge)) return true;
+    const previous = steps[index - 1];
+    return previous !== undefined && !isTransferEdge(previous.edge) && previous.edge.routeId !== step.edge.routeId;
+  }).length;
 
   return {
     found: true,

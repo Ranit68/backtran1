@@ -14,16 +14,28 @@ function node(id: string, name: string, mode: GraphNode["mode"] = "BUS"): GraphN
   return { id, name, mode };
 }
 
-function rideEdge(from: string, to: string, minutes: number, mode: GraphNode["mode"] = "BUS"): GraphEdge {
+function rideEdge(
+  from: string,
+  to: string,
+  minutes: number,
+  mode: GraphNode["mode"] = "BUS",
+  routeId = "bus:1",
+  routeNo = "1",
+): GraphEdge {
   return {
     fromNodeId: from,
     toNodeId: to,
     mode,
-    routeId: "bus:1",
-    routeNo: "1",
+    routeId,
+    routeNo,
     operator: "WBTC",
     estimatedTimeMinutes: minutes,
   };
+}
+
+/** A ride edge on a named line, for the two-line cases below. */
+function lineEdge(from: string, to: string, minutes: number, line: string, mode: GraphNode["mode"] = "METRO"): GraphEdge {
+  return rideEdge(from, to, minutes, mode, `metro:metro-railway:${line.toLowerCase()}`, line);
 }
 
 function transferEdge(from: string, to: string, minutes = 5): GraphEdge {
@@ -171,6 +183,96 @@ describe("findPath", () => {
     // What MIN_INTERCHANGE guarantees is the change is taken as early as
     // possible, i.e. the total time is not inflated by avoiding it.
     expect(fewest.found).toBe(true);
+  });
+});
+
+describe("changing lines is priced as an interchange", () => {
+  /**
+   * The live Blue Line case that motivated these tests. BLUE and PURPLE both
+   * stop at Esplanade and Park Street, one hop apart, and PURPLE was measured
+   * slightly faster per hop (2.84 against BLUE's 3.37).
+   *
+   * The search used to treat that swap as free, because it only charged the
+   * interchange penalty on explicit TRANSFER edges. It then bought the cheaper
+   * line for a single hop and the journey planner billed the passenger 5 minutes
+   * for each of the two resulting line changes, turning an 81 minute ride into
+   * 90. Pricing the change in the search is what stops the swap happening.
+   */
+  const blueLine = [
+    lineEdge("metro:start", "metro:esplanade", 3.37, "BLUE"),
+    lineEdge("metro:esplanade", "metro:park", 3.37, "BLUE"),
+    lineEdge("metro:park", "metro:goal", 3.37, "BLUE"),
+  ];
+  const fasterParallelLine = [
+    lineEdge("metro:esplanade", "metro:park", 2.84, "PURPLE"),
+    lineEdge("metro:park", "metro:goal", 2.84, "PURPLE"),
+  ];
+
+  it("stays on one line rather than buying a cheaper line for a single hop", () => {
+    const graph = makeGraph([...blueLine, ...fasterParallelLine]);
+
+    const result = findPath(graph, "metro:start", "metro:goal", { modes: "METRO" });
+
+    expect(result.found).toBe(true);
+    expect(result.steps).toHaveLength(3);
+    expect(result.transfers).toBe(0);
+    // Three BLUE hops, not a BLUE-PURPLE-BLUE swap.
+    expect(result.totalTimeMinutes).toBe(10.11);
+    expect(new Set(result.steps.map((step) => step.edge.routeNo))).toEqual(new Set(["BLUE"]));
+  });
+
+  it("still changes lines when that is genuinely the quickest way through", () => {
+    // PURPLE is the only way to leave this branch, so the change is required.
+    const graph = makeGraph([
+      lineEdge("metro:start", "metro:esplanade", 3.37, "BLUE"),
+      lineEdge("metro:esplanade", "metro:junction", 3.37, "BLUE"),
+      lineEdge("metro:esplanade", "metro:junction", 2.84, "PURPLE"),
+      lineEdge("metro:junction", "metro:goal", 4, "PURPLE"),
+    ]);
+
+    const result = findPath(graph, "metro:start", "metro:goal", { modes: "METRO" });
+
+    expect(result.found).toBe(true);
+    // One real change, and it is counted.
+    expect(result.transfers).toBe(1);
+  });
+
+  it("counts a line change with no transfer edge as an interchange", () => {
+    const graph = makeGraph([
+      lineEdge("metro:a", "metro:h", 5, "BLUE"),
+      lineEdge("metro:h", "metro:z", 5, "PURPLE"),
+    ]);
+
+    expect(findPath(graph, "metro:a", "metro:z", { modes: "METRO" }).transfers).toBe(1);
+  });
+
+  it("MIN_INTERCHANGE never takes the quicker line when it means a change", () => {
+    const graph = makeGraph([...blueLine, ...fasterParallelLine]);
+
+    const result = findPath(graph, "metro:start", "metro:goal", {
+      modes: "METRO",
+      strategy: "MIN_INTERCHANGE",
+    });
+
+    expect(result.found).toBe(true);
+    expect(result.transfers).toBe(0);
+    expect(new Set(result.steps.map((step) => step.edge.routeNo))).toEqual(new Set(["BLUE"]));
+  });
+
+  it("keeps a bus to metro transfer priced once, not twice", () => {
+    // A TRANSFER edge is already charged the penalty, so the first ride after
+    // it must not be charged for changing lines as well.
+    const graph = makeGraph([
+      rideEdge("bus:a", "bus:h", 5),
+      transferEdge("bus:h", "metro:h", 5),
+      lineEdge("metro:h", "metro:z", 5, "BLUE"),
+    ]);
+
+    const result = findPath(graph, "bus:a", "metro:z", { modes: "ALL" });
+
+    expect(result.found).toBe(true);
+    expect(result.transfers).toBe(1);
+    expect(result.totalTimeMinutes).toBe(15);
   });
 });
 
