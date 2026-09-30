@@ -13,6 +13,7 @@ import { tramRoutes } from "./routes/tram.routes.js";
 import { metroRoutes } from "./routes/metro.routes.js";
 import { ferryRoutes } from "./routes/ferry.routes.js";
 import { journeyRoutes } from "./routes/journey.routes.js";
+import { connectionRoutes } from "./routes/connections.routes.js";
 import { adminRoutes } from "./routes/admin.routes.js";
 import { getGraphStatus } from "./services/graph.service.js";
 import { sendFrontend } from "./frontend.js";
@@ -123,8 +124,9 @@ export async function buildApp(): Promise<FastifyInstance> {
       await api.register(tramRoutes);
       await api.register(metroRoutes);
       await api.register(ferryRoutes);
-      await api.register(journeyRoutes);
-      await api.register(adminRoutes);
+await api.register(journeyRoutes);
+await api.register(connectionRoutes);
+await api.register(adminRoutes);
     },
     { prefix: "/api" },
   );
@@ -173,6 +175,7 @@ export async function buildApp(): Promise<FastifyInstance> {
           "GET /api/ferry/search",
         ],
         journey: "POST /api/journey",
+        connections: "GET /api/routes/:routeNo/connections?mode=",
         graph: ["GET /api/graph/stats", "GET /api/graph/transfers"],
         admin: ["GET /api/admin/status", "POST /api/admin/graph/refresh"],
       },
