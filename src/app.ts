@@ -14,6 +14,7 @@ import { metroRoutes } from "./routes/metro.routes.js";
 import { ferryRoutes } from "./routes/ferry.routes.js";
 import { journeyRoutes } from "./routes/journey.routes.js";
 import { connectionRoutes } from "./routes/connections.routes.js";
+import { communityRoutes } from "./routes/community.routes.js";
 import { adminRoutes } from "./routes/admin.routes.js";
 import { getGraphStatus } from "./services/graph.service.js";
 import { sendFrontend } from "./frontend.js";
@@ -97,6 +98,15 @@ export async function buildApp(): Promise<FastifyInstance> {
     // large) carry a statusCode; surface them as 4xx rather than 500.
     const statusCode = typeof error.statusCode === "number" ? error.statusCode : 500;
     if (statusCode < 500) {
+      // A throttle is not a validation failure. Reporting it as VALIDATION_ERROR
+      // would tell a client its request was malformed, so a well-behaved client
+      // would stop retrying instead of backing off and trying again later.
+      // Matched on the status rather than an error code: @fastify/rate-limit
+      // throws a plain Error carrying only statusCode, so there is no code to
+      // match, and 429 means exactly one thing.
+      if (statusCode === 429) {
+        return sendFail(reply, ErrorCode.RATE_LIMITED, error.message, statusCode);
+      }
       const code =
         error.code === "FST_ERR_CTP_INVALID_JSON_BODY" || error.code === "FST_ERR_CTP_EMPTY_JSON_BODY"
           ? ErrorCode.INVALID_JSON
@@ -126,6 +136,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await api.register(ferryRoutes);
 await api.register(journeyRoutes);
 await api.register(connectionRoutes);
+ await api.register(communityRoutes);
 await api.register(adminRoutes);
     },
     { prefix: "/api" },
@@ -176,6 +187,10 @@ await api.register(adminRoutes);
         ],
         journey: "POST /api/journey",
         connections: "GET /api/routes/:routeNo/connections?mode=",
+        community: [
+          "GET /api/community/:mode/:route",
+          "POST /api/community/:mode/:route",
+        ],
         graph: ["GET /api/graph/stats", "GET /api/graph/transfers"],
         admin: ["GET /api/admin/status", "POST /api/admin/graph/refresh"],
       },

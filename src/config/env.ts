@@ -52,6 +52,23 @@ const envSchema = z.object({
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(300),
   RATE_LIMIT_WINDOW: z.string().default("1 minute"),
 
+  /**
+   * Write limit for community posts, per IP.
+   *
+   * Separate from RATE_LIMIT_MAX because the two protect different things. The
+   * global limit stops a client from tying up read capacity; this one protects
+   * the feed other riders have to read. A single client posting hundreds of
+   * reports a minute would fill a route's community with noise that then blocks
+   * that route for 24 hours, and every reader pays for it.
+   *
+   * Kept in env so it can be tuned per environment, and so the test suite can
+   * raise it: inject() sends every request from the same loopback address, so
+   * the production default would otherwise make the suite fail on 429s that say
+   * nothing about the code.
+   */
+  COMMUNITY_POST_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(5),
+  COMMUNITY_POST_RATE_LIMIT_WINDOW: z.string().default("10 minutes"),
+
   /** Shared secret for POST /api/admin/graph/refresh. When unset the route 503s. */
   ADMIN_KEY: optionalText,
 

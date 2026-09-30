@@ -132,6 +132,33 @@ describe("error envelope", () => {
     expect(body.success).toBe(false);
     expect(body.error.code).toBe("DATABASE_NOT_CONFIGURED");
   });
+
+  it("reports a throttle as RATE_LIMITED, not as a validation failure", async () => {
+    // The community write limiter is the only per-route limit in the app, so it
+    // is what this exercises. The first five posts get through the limiter and
+    // then fail on the missing database, which is itself worth asserting: the
+    // limiter runs before the handler, so an unauthenticated caller cannot use
+    // a broken database to get unlimited writes. It also proves the community
+    // repository honours the no-database contract, since that 503 comes from
+    // requireDatabase() rather than from a caught driver error.
+    const url = "/api/community/METRO/BLUE";
+    const payload = { message: "rate limit contract check" };
+    const statuses: number[] = [];
+    let last: { success: boolean; error: { code: string } } | null = null;
+
+    for (let i = 0; i < 6; i++) {
+      const response = await app.inject({ method: "POST", url, payload });
+      statuses.push(response.statusCode);
+      last = response.json();
+    }
+
+    expect(statuses.slice(0, 5)).toEqual([503, 503, 503, 503, 503]);
+    expect(statuses[5]).toBe(429);
+    // A client told VALIDATION_ERROR would treat the request as malformed and
+    // give up; RATE_LIMITED tells it to back off and try again.
+    expect(last!.success).toBe(false);
+    expect(last!.error.code).toBe("RATE_LIMITED");
+  });
 });
 
 describe("request validation", () => {

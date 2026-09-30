@@ -54,6 +54,28 @@ a{color:var(--accent)}
   padding:7px 12px; font:500 12px/1 var(--mono); cursor:pointer}
 .mast__btn:hover{border-color:var(--faint)}
 
+/* ---------- community ---------- */
+.cm-pick{display:grid; grid-template-columns:150px 1fr auto; gap:10px; align-items:end; margin-bottom:14px}
+.cm-pick .inp{margin:0}
+@media (max-width:640px){ .cm-pick{grid-template-columns:1fr} }
+.cm-post{padding:14px 16px; border-bottom:1px solid var(--line)}
+.cm-post:last-child{border-bottom:0}
+.cm-msg{font-size:15px; line-height:1.5; color:var(--paper); white-space:pre-wrap; overflow-wrap:anywhere}
+.cm-meta{display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:8px;
+  font:400 11px/1 var(--mono); color:var(--faint)}
+.cm-meta b{color:var(--mute); font-weight:500}
+.cm-post--mine{background:rgba(79,180,119,.05)}
+.cm-write{display:grid; gap:10px; margin:16px 0}
+.cm-write textarea{width:100%; min-height:76px; resize:vertical; background:var(--ink);
+  border:1px solid var(--line); border-radius:8px; color:var(--paper); padding:11px 12px;
+  font:400 15px/1.5 var(--sans)}
+.cm-write textarea:focus{outline:0; border-color:var(--faint)}
+.cm-row{display:flex; gap:12px; align-items:center; justify-content:space-between}
+.cm-count{font:400 11px/1 var(--mono); color:var(--faint)}
+.cm-count--over{color:var(--bad)}
+.cm-empty{padding:18px 16px; font-size:14px; color:var(--faint)}
+.cm-note{font-size:12.5px; color:var(--faint); margin:14px 0 0; line-height:1.6}
+
 /* ---------- tabs ---------- */
 .tabs{display:flex; gap:2px; overflow-x:auto; scrollbar-width:none; border-bottom:1px solid var(--line);
   position:sticky; top:55px; background:rgba(14,20,28,.92); backdrop-filter:blur(8px); z-index:39}
@@ -241,6 +263,7 @@ select.inp{font-family:var(--mono); font-size:13px; cursor:pointer}
   <button class="tab" role="tab" id="t-routes"  aria-controls="p-routes"  aria-selected="false">Routes</button>
   <button class="tab" role="tab" id="t-stops"   aria-controls="p-stops"   aria-selected="false">Stops</button>
   <button class="tab" role="tab" id="t-network" aria-controls="p-network" aria-selected="false">Network</button>
+<button class="tab" role="tab" id="t-community" aria-controls="p-community" aria-selected="false">Community</button>
   <button class="tab" role="tab" id="t-api"     aria-controls="p-api"     aria-selected="false">API</button>
 </nav>
 
@@ -337,6 +360,50 @@ select.inp{font-family:var(--mono); font-size:13px; cursor:pointer}
 
     <div class="sect">Data import</div>
     <div class="list" id="diagList"></div>
+  </section>
+
+  <!-- ===================== Community ===================== -->
+  <section class="panel" id="p-community" role="tabpanel" aria-labelledby="t-community" hidden>
+    <div class="note">
+      <b>What riders are reporting right now, on one route only.</b>
+      Open the community for a route and you will only ever see reports about that
+      route. Posts are anonymous text, and each one disappears 24 hours after it
+      is written.
+    </div>
+
+    <div class="cm-pick">
+      <div>
+        <label class="lab" for="cmMode">Mode</label>
+        <select class="inp" id="cmMode">
+          <option value="BUS">Bus</option>
+          <option value="METRO" selected>Metro</option>
+          <option value="FERRY">Ferry</option>
+          <option value="TRAM">Tram</option>
+        </select>
+      </div>
+      <div>
+        <label class="lab" for="cmRoute">Route</label>
+        <input class="inp" id="cmRoute" placeholder="BLUE, or North-South / Blue Line" autocomplete="off">
+      </div>
+      <div><button class="btn btn--ghost" id="cmGo" type="button">Open</button></div>
+    </div>
+
+    <p class="hint" id="cmHint">Pick a route to see its reports.</p>
+
+    <div class="cm-write" id="cmWrite" hidden>
+      <div>
+        <label class="lab" for="cmText">Report something</label>
+        <textarea id="cmText" placeholder="Heavy traffic near Dum Dum, running about 20 minutes late."></textarea>
+      </div>
+      <div class="cm-row">
+        <span class="cm-count" id="cmCount">0 / 500</span>
+        <button class="btn" id="cmPost" type="button">Post report</button>
+      </div>
+      <div id="cmPostErr"></div>
+    </div>
+
+    <div class="list" id="cmFeed"></div>
+    <p class="cm-note" id="cmNote" hidden></p>
   </section>
 
   <!-- ===================== API ===================== -->
@@ -460,7 +527,7 @@ function health() {
 }
 
 /* ============================ tabs ============================ */
-var TABS = [["plan", function () {}], ["routes", loadRoutes], ["stops", function () {}], ["network", loadNetwork], ["api", buildExplorer]];
+var TABS = [["plan", function () {}], ["routes", loadRoutes], ["stops", function () {}], ["network", loadNetwork], ["community", function () {}], ["api", buildExplorer]];
 TABS.forEach(function (t) {
   $("#t-" + t[0]).addEventListener("click", function () {
     TABS.forEach(function (x) {
@@ -471,6 +538,151 @@ TABS.forEach(function (t) {
     t[1]();
   });
 });
+
+/* ============================ community ============================ */
+/* The 24 hour lifetime and the 500 character cap are read back from the API and
+   applied to this panel, rather than typed in here. If the server ever tightens
+   the rule, the composer follows it; if the client hardcoded 500 it would happily
+   let someone write a post the server then rejects. */
+var cmMax = 500, cmTtl = 24, cmScope = null;
+/* Report ids this browser posted in this session. The server cannot know who wrote
+   a post, because there are no accounts, so this is the only honest way to mark
+   one as "yours": remember what we just sent. */
+var cmMine = {};
+
+function cmAgo(iso) {
+  var then = Date.parse(iso);
+  if (isNaN(then)) return "";
+  var s = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (s < 60) return "just now";
+  var m = Math.round(s / 60); if (m < 60) return m + " min ago";
+  var h = Math.round(m / 60); if (h < 24) return h + " hr ago";
+  return Math.round(h / 24) + " d ago";
+}
+/* The exact wall-clock time is always present in the title attribute, because
+   "12 min ago" is what a rider reads but "what time was it posted" is what they
+   actually asked. */
+function cmClock(iso) {
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  try {
+    return d.toLocaleString(undefined, { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+  } catch (e) { return d.toISOString(); }
+}
+function cmCount() {
+  var ta = $("#cmText"), n = ta.value.length;
+  var el = $("#cmCount");
+  el.textContent = n + " / " + cmMax;
+  el.className = "cm-count" + (n > cmMax ? " cm-count--over" : "");
+}
+function cmEmpty(text) {
+  $("#cmFeed").innerHTML = '<div class="cm-empty">' + esc(text) + "</div>";
+}
+function loadCommunity() {
+  var mode = $("#cmMode").value;
+  var route = $("#cmRoute").value.trim();
+  if (!route) { cmScope = null; $("#cmWrite").hidden = true; $("#cmNote").hidden = true; cmEmpty("Pick a route to see its reports."); return; }
+
+  cmEmpty("Loading reports for " + route + "...");
+  return api("/community/" + encodeURIComponent(mode) + "/" + encodeURIComponent(route))
+    .then(function (res) {
+      if (!res.ok || !res.json || !res.json.success) {
+        cmScope = null;
+        $("#cmWrite").hidden = true;
+        $("#cmNote").hidden = true;
+        /* The hint has to be cleared too. Leaving the previous route's "N of M
+           reports showing" in place would tell the reader that the route they
+           just typed resolved, when the whole point of the 404 is that it did
+           not. */
+        $("#cmHint").textContent = "";
+        /* The note too. It names the last route that resolved, so leaving it in
+           place would keep telling the reader the rules for a route they are no
+           longer looking at. */
+        $("#cmNote").hidden = true;
+        if (res.status === 404) {
+          /* 404 rather than an empty feed, deliberately: "nobody is posting" and
+             "that route does not exist" must never look the same. */
+          cmEmpty("No " + mode + " route matching \u201c" + route + "\u201d was found.");
+        } else {
+          $("#cmFeed").innerHTML = '<div class="cm-empty">' + esc(msgOf(res)) + "</div>";
+        }
+        return;
+      }
+      var feed = res.json.data || {};
+      cmScope = feed.scope || null;
+      cmMax = feed.messageMaxLength || 500;
+      cmTtl = feed.ttlHours || 24;
+      $("#cmText").maxLength = cmMax;
+      cmCount();
+
+      var list = feed.reports || [];
+      if (!list.length) {
+        cmEmpty("No reports for " + (cmScope ? cmScope.label : route) + " yet. Be the first to post.");
+      } else {
+        $("#cmFeed").innerHTML = list.map(function (r) {
+          return '<div class="cm-post' + (cmMine[r.reportId] ? " cm-post--mine" : "") + '">' +
+            '<div class="cm-msg">' + esc(r.message) + "</div>" +
+            '<div class="cm-meta">' +
+              (cmMine[r.reportId] ? "<b>posted from this browser</b>" : "<b>anonymous</b>") +
+              '<span title="' + esc(r.createdAt) + '">' + esc(cmClock(r.createdAt)) + "</span>" +
+              "<span>" + esc(cmAgo(r.createdAt)) + "</span>" +
+              "<span>" + (r.expiresInHours > 0 ? "expires in " + r.expiresInHours + " hr" : "expiring") + "</span>" +
+            "</div></div>";
+        }).join("");
+      }
+
+      $("#cmHint").textContent = cmScope
+        ? cmScope.label + " \u00b7 " + list.length + " of " + feed.totalActive + " report" +
+          (feed.totalActive === 1 ? "" : "s") + " showing" + (feed.hasMore ? " \u2014 older reports not loaded" : "")
+        : "";
+      $("#cmWrite").hidden = !cmScope;
+      var note = $("#cmNote");
+      note.textContent = "Posts are anonymous and last " + cmTtl + " hours, then they are deleted. " +
+        "Anyone can read the reports for " + (cmScope ? cmScope.label : route) + ", and only that route.";
+      note.hidden = !cmScope;
+    });
+}
+function postCommunity() {
+  var btn = $("#cmPost"), ta = $("#cmText"), box = $("#cmPostErr");
+  if (!cmScope) return;
+  var text = ta.value.trim();
+  if (!text) { box.innerHTML = '<div class="err"><b>Nothing to post</b>Write something first.</div>'; return; }
+  if (text.length > cmMax) { box.innerHTML = '<div class="err"><b>Too long</b>Keep it under ' + cmMax + " characters.</div>"; return; }
+
+  btn.disabled = true;
+  box.innerHTML = "";
+  return api("/community/" + encodeURIComponent(cmScope.mode) + "/" + encodeURIComponent(cmScope.key), {
+    method: "POST", body: { message: text }
+  }).then(function (res) {
+    btn.disabled = false;
+    if (!res.ok || !res.json || !res.json.success) {
+      /* 429 is the write limiter, and it deserves a plain explanation rather than
+         the raw text, because "HTTP 429" tells a rider nothing about waiting 10
+         minutes. */
+      box.innerHTML = '<div class="err"><b>' +
+        (res.status === 429 ? "Slow down" : "Could not post \u00b7 HTTP " + res.status) + "</b>" +
+        esc(res.status === 429 ? "This route already has a few recent reports. Try again in a few minutes." : msgOf(res)) +
+        "</div>";
+      return;
+    }
+    cmMine[res.json.data.reportId] = true;
+    ta.value = "";
+    cmCount();
+    loadCommunity();
+  }).catch(function () { btn.disabled = false; });
+}
+$("#cmGo").addEventListener("click", loadCommunity);
+$("#cmRoute").addEventListener("keydown", function (e) { if (e.key === "Enter") loadCommunity(); });
+$("#cmMode").addEventListener("change", function () { if (cmScope) cmScope = null; loadCommunity(); });
+$("#cmPost").addEventListener("click", postCommunity);
+$("#cmText").addEventListener("input", cmCount);
+/* Keeps the countdown honest without a page reload: posts vanish on their own 24
+   hour clock, so a feed left open should not keep showing something that is
+   already gone. Only refetches when the community tab is actually on screen. */
+setInterval(function () {
+  var panel = $("#p-community");
+  if (panel && !panel.hidden && cmScope) loadCommunity();
+}, 60000);
 
 /* ============================ autocomplete ============================ */
 function wireAC(inputId, acId) {
