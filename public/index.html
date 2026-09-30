@@ -13,7 +13,8 @@
 :root{
   --ink:#0E141C; --ink-2:#151D28; --ink-3:#1D2734; --line:#2A3644;
   --paper:#E9EDF3; --mute:#93A1B2; --faint:#6B798C;
-  --bus:#E4573D; --metro:#3E7BD6; --walk:#46A596; --accent:#E5B53C;
+  --bus:#E4573D; --metro:#3E7BD6; --ferry:#0F7C80;
+  --tram:#3E8A4A; --walk:#46A596; --accent:#E5B53C;
   --ok:#4FB477; --bad:#D9534F;
   --sans:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
   --sign:"Barlow Condensed","Arial Narrow",sans-serif;
@@ -298,7 +299,7 @@ select.inp{font-family:var(--mono); font-size:13px; cursor:pointer}
     <div class="bar">
       <div><label class="lab" for="rQ">Find a route</label><input class="inp" id="rQ" placeholder="Route number, e.g. AC-3 or 14A"></div>
       <div><label class="lab" for="rMode">Mode</label>
-        <select class="inp" id="rMode"><option value="BUS">Bus</option><option value="METRO">Metro</option></select></div>
+        <select class="inp" id="rMode"><option value="BUS">Bus</option><option value="METRO">Metro</option><option value="FERRY">Ferry</option><option value="TRAM">Tram</option></select></div>
       <div><label class="lab" for="rSort">Sort</label>
         <select class="inp" id="rSort"></select></div>
       <div><button class="btn btn--ghost" id="rGo" type="button">Search</button></div>
@@ -313,7 +314,7 @@ select.inp{font-family:var(--mono); font-size:13px; cursor:pointer}
     <div class="bar">
       <div><label class="lab" for="sQ">Find a stop</label><input class="inp" id="sQ" placeholder="Stop name, e.g. Esplanade or Gariahat"></div>
       <div><label class="lab" for="sMode">Mode</label>
-        <select class="inp" id="sMode"><option value="ALL">All modes</option><option value="BUS">Bus</option><option value="METRO">Metro</option></select></div>
+        <select class="inp" id="sMode"><option value="ALL">All modes</option><option value="BUS">Bus</option><option value="METRO">Metro</option><option value="FERRY">Ferry</option><option value="TRAM">Tram</option></select></div>
       <div><button class="btn btn--ghost" id="sGo" type="button">Search</button></div>
     </div>
     <p class="hint" id="sCount">Type a stop name to search across the network.</p>
@@ -397,7 +398,7 @@ var esc = function (s) {
     return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
   });
 };
-var MODE_VAR = { BUS: "var(--bus)", METRO: "var(--metro)", WALK: "var(--walk)", TRANSFER: "var(--walk)", FERRY: "var(--mute)" };
+var MODE_VAR = { BUS: "var(--bus)", METRO: "var(--metro)", FERRY: "var(--ferry)", TRAM: "var(--tram)", WALK: "var(--walk)", TRANSFER: "var(--walk)" };
 var modeColor = function (m) { return MODE_VAR[m] || "var(--mute)"; };
 
 /* ============================ api client ============================ */
@@ -846,7 +847,7 @@ function loadNetwork() {
 
   api("/health").then(function (r) {
     var m = (r.json && r.json.data && r.json.data.modes) || {};
-    var order = ["BUS", "METRO", "FERRY"];
+    var order = ["BUS", "METRO", "FERRY", "TRAM"];
     $("#modesList").innerHTML = order.map(function (k) {
       var d = m[k] || {};
       var on = d.implemented === true;
@@ -1002,12 +1003,23 @@ var ENDPOINTS = [
   { g: "Metro", m: "GET", p: "/metro/routes/:routeId", pv: "routeId", q: [["routeId", "path", "BLUE"]] },
   { g: "Metro", m: "GET", p: "/metro/routes/:line/trips", pv: "line", q: [["line", "path", "BLUE"], ["serviceDay", "WEEKDAY|SATURDAY|SUNDAY", ""], ["direction", "UP|DOWN", ""], ["from", "HH:MM", ""], ["limit", "1-500", "20"], ["offset", "number", "0"]] },
   { g: "Metro", m: "GET", p: "/metro/search", q: [["q", "required", "Esplanade"]] },
-  { g: "Retired", m: "GET", p: "/tram/*", q: [["any path", "returns 410", "/tram/routes"]] },
-  { g: "Ferry · not in this build", m: "GET", p: "/ferry/status" },
-  { g: "Ferry · not in this build", m: "GET", p: "/ferry/routes" },
-  { g: "Ferry · not in this build", m: "GET", p: "/ferry/routes/:routeNo", pv: "routeNo" },
-  { g: "Ferry · not in this build", m: "GET", p: "/ferry/routes/:routeNo/stops", pv: "routeNo" },
-  { g: "Ferry · not in this build", m: "GET", p: "/ferry/routes/:routeNo/timetable", pv: "routeNo" },
+  { g: "Tram · live", m: "GET", p: "/tram/routes" },
+  { g: "Tram · live", m: "GET", p: "/tram/routes/:routeNo", pv: "routeNo" },
+  { g: "Tram · live", m: "GET", p: "/tram/routes/:routeNo/stops", pv: "routeNo" },
+  { g: "Tram · live", m: "GET", p: "/tram/routes/:routeNo/legs", pv: "routeNo" },
+  { g: "Tram · live", m: "GET", p: "/tram/routes/:routeNo/timetable", pv: "routeNo" },
+  { g: "Tram · heritage", m: "GET", p: "/tram/heritage" },
+  { g: "Tram · heritage", m: "GET", p: "/tram/excluded" },
+  { g: "Tram · live", m: "GET", p: "/tram/search" },
+  { g: "Tram · live", m: "GET", p: "/tram/diagnostics" },
+  { g: "Ferry · live", m: "GET", p: "/ferry/status" },
+  { g: "Ferry · live", m: "GET", p: "/ferry/routes" },
+  { g: "Ferry · live", m: "GET", p: "/ferry/routes/:routeNo", pv: "routeNo" },
+  { g: "Ferry · live", m: "GET", p: "/ferry/routes/:routeNo/stops", pv: "routeNo" },
+  { g: "Ferry · live", m: "GET", p: "/ferry/routes/:routeNo/timetable", pv: "routeNo" },
+  { g: "Ferry · live", m: "GET", p: "/ferry/ghats" },
+  { g: "Ferry · live", m: "GET", p: "/ferry/search" },
+  { g: "Ferry · live", m: "GET", p: "/ferry/diagnostics" },
   { g: "Admin · key required", m: "GET", p: "/admin/status" },
   { g: "Admin · key required", m: "GET", p: "/admin/routes/aliases", q: [["mode", "BUS | METRO", ""]], admin: true },
   { g: "Admin · key required", m: "POST", p: "/admin/routes/alias", admin: true,
