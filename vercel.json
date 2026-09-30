@@ -11,6 +11,14 @@
     {
       "source": "/api/:path*",
       "destination": "/api/index.ts"
+    },
+    {
+      "source": "/",
+      "destination": "/api/index.ts"
+    },
+    {
+      "source": "/:path*",
+      "destination": "/api/index.ts"
     }
   ]
 }

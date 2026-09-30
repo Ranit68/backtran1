@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
 import { closePool } from "../src/config/database.js";
@@ -293,5 +294,61 @@ describe("frontend", () => {
     const response = await app.inject({ method: "GET", url: "/api/does-not-exist" });
     expect(response.statusCode).toBe(404);
     expect(response.json().error.code).toBe("NOT_FOUND");
+  });
+});
+
+/**
+ * Deployment config contract.
+ *
+ * The tests above already prove the app serves the frontend for any non-API
+ * path. That is not the same as proving the browser ever asks it to, because on
+ * Vercel that request has to survive a routing decision made in vercel.json
+ * before any code runs. When the only rewrite covered /api/*, / was answered by
+ * Vercel itself and every page load 500ed while the entire app test suite stayed
+ * green. The regression was invisible from inside the repo, so the config is
+ * asserted here where a change to it has to break something.
+ */
+describe("vercel.json routing", () => {
+  const config = JSON.parse(readFileSync(new URL("../vercel.json", import.meta.url), "utf8")) as {
+    functions?: Record<string, { includeFiles?: string[] }>;
+    rewrites?: { source: string; destination: string }[];
+  };
+  const rewrites = config.rewrites ?? [];
+  const entryPoint = "api/index.ts";
+
+  it("routes the root to the serverless entry point", () => {
+    // Without this the deployed site 500s on every page load, which is the
+    // failure this file exists to prevent.
+    expect(rewrites.map((r) => r.source)).toContain("/");
+  });
+
+  it("routes deep links to the entry point so a reload lands on the app", () => {
+    expect(rewrites.map((r) => r.source)).toContain("/:path*");
+  });
+
+  it("sends every rewrite to the single function", () => {
+    // Two entry points would mean two copies of the cached Fastify instance and
+    // two separate Postgres pools.
+    for (const rewrite of rewrites) {
+      expect(rewrite.destination).toBe(`/${entryPoint}`);
+    }
+  });
+
+  it("matches API paths before the catch-all", () => {
+    // Vercel applies the first matching rewrite and only the first, so the
+    // catch-all has to come last. If it were first it would swallow /api/* and
+    // route API calls through the frontend fallback.
+    const apiIndex = rewrites.findIndex((r) => r.source.startsWith("/api"));
+    const catchAllIndex = rewrites.findIndex((r) => r.source === "/:path*");
+    expect(apiIndex).toBeGreaterThanOrEqual(0);
+    expect(catchAllIndex).toBeGreaterThanOrEqual(0);
+    expect(apiIndex).toBeLessThan(catchAllIndex);
+  });
+
+  it("bundles the frontend into the function, since the host serves no files", () => {
+    // public/index.html is read at runtime by src/frontend.ts, so if it is not
+    // included in the bundle the entry point 500s on every page request.
+    const include = config.functions?.[entryPoint]?.includeFiles ?? [];
+    expect(include).toContain("public/**");
   });
 });
