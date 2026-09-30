@@ -7,9 +7,9 @@
  * rather than guessed.
  */
 
-export type TransportMode = "METRO" | "BUS" | "FERRY";
+export type TransportMode = "METRO" | "BUS" | "FERRY" | "TRAM";
 
-export const TRANSPORT_MODES: readonly TransportMode[] = ["METRO", "BUS", "FERRY"];
+export const TRANSPORT_MODES: readonly TransportMode[] = ["METRO", "BUS", "FERRY", "TRAM"];
 
 export function isTransportMode(value: string): value is TransportMode {
   return (TRANSPORT_MODES as readonly string[]).includes(value);
@@ -18,12 +18,17 @@ export function isTransportMode(value: string): value is TransportMode {
 /**
  * Modes that used to be part of the API and are no longer served.
  *
- * Kolkata's tram service has been withdrawn, so TRAM is no longer a member of
- * TransportMode and cannot be requested from search, the graph or the journey
- * planner. It is kept here so the API can answer a client that still asks for
- * it with a precise 410 Gone instead of a confusing "no results" or a bare 404.
+ * Empty. TRAM used to be listed here on the premise that Kolkata's tram service
+ * had been withdrawn, which was incorrect: the tram network is still in
+ * operation, and the current route data (TRAM5 Shyambazar<->Esplanade, TRAM25
+ * Gariahat<->Esplanade) is OPERATIONAL. TRAM is now a first-class
+ * TransportMode, routed from `tram_legs`, with `transport_modes.tram` already
+ * enabled.
+ *
+ * The empty list is kept rather than deleted because callers still branch on it
+ * when deciding how to answer a mode the graph cannot serve.
  */
-export const RETIRED_TRANSPORT_MODES = ["TRAM"] as const;
+export const RETIRED_TRANSPORT_MODES = [] as const;
 
 export type RetiredTransportMode = (typeof RETIRED_TRANSPORT_MODES)[number];
 
@@ -31,11 +36,19 @@ export function isRetiredTransportMode(value: string): value is RetiredTransport
   return (RETIRED_TRANSPORT_MODES as readonly string[]).includes(value);
 }
 
-export const TRAM_WITHDRAWAL_NOTE =
-  "Kolkata's tram service has been withdrawn. TRAM is no longer a transport mode in this API: " +
-  "the tram routes were removed from the transport graph, /api/tram/* returns 410 Gone, and " +
-  "mode=TRAM is rejected by search and the journey planner. Use mode=METRO or mode=BUS, or " +
-  "mode=ALL for combined bus and metro routing.";
+/**
+ * Reasons a mode cannot produce a ride path right now. Surfaced as a precise
+ * 501 with the reason rather than an empty list, which would falsely imply the
+ * city has no such service.
+ */
+export const MODE_UNAVAILABLE_NOTES = {
+  FERRY:
+    "Ferry routing is unavailable because the ferry data set could not be loaded. " +
+    "BUS, METRO and TRAM routing are unaffected.",
+  TRAM:
+    "Tram routing is unavailable because the tram data set could not be loaded. " +
+    "BUS, METRO and FERRY routing are unaffected.",
+} as const;
 
 export interface TransportStop {
   id: string;
@@ -177,6 +190,127 @@ export interface JourneyResponse {
   /** True when at least one leg's time came from a real timetable row. */
   timetableMatched: boolean;
   warnings: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Metro-only planning
+//
+// The generic JourneyResponse above answers "how do I get there". These types
+// answer the question a Metro passenger actually asks, which is a different one:
+// which line, in which direction, and where exactly do I change. The generic
+// response encodes a change of line as an undifferentiated TRANSFER leg, so the
+// line being left and the line being joined are only inferable by comparing
+// neighbouring segments. These types state them.
+// ---------------------------------------------------------------------------
+
+/**
+ * Platform reporting.
+ *
+ * The supplied Metro data records lines, stations and station codes, and no
+ * platform numbers. Rather than invent a platform, this reports `known: false`
+ * with the reason, so a client can tell the passenger what to actually look for
+ * -- the line colour and the destination signage on the platform.
+ */
+export interface MetroPlatformInfo {
+  known: boolean;
+  fromPlatform?: string;
+  toPlatform?: string;
+  note: string;
+}
+
+export interface MetroInterchange {
+  /** Station where the change happens. */
+  station: string;
+  stationCode: string | null;
+  /** Every line serving this station, not only the two involved. */
+  linesAtStation: string[];
+  /** Line the passenger is leaving. */
+  fromLine: string;
+  /** Line the passenger is joining. */
+  toLine: string;
+  /**
+   * Terminus each train is heading toward. This is real, derived data: it is the
+   * end of the line on the far side of the interchange from the direction of
+   * travel, taken from the line's own station order. It is what a passenger uses
+   * to pick the right platform when no platform numbers exist.
+   */
+  fromDirection: string | null;
+  toDirection: string | null;
+  /** Boarding and alighting clock times, when the timetable supplied them. */
+  fromArrivalTime?: string;
+  toDepartureTime?: string;
+  /** Static planning allowance for the change, never a measurement. */
+  interchangeMinutes: number;
+  platforms: MetroPlatformInfo;
+  /** Ready-to-display instruction. */
+  instruction: string;
+}
+
+export interface MetroJourneyResponse {
+  source: string;
+  destination: string;
+  totalTimeMinutes: number;
+  interchangeCount: number;
+  /** Metro lines used, in travel order and without repeats. */
+  linesUsed: string[];
+  /** Intermediate stations passed, excluding the two endpoints. */
+  stationsPassed: number;
+  segments: JourneySegment[];
+  interchanges: MetroInterchange[];
+  strategy: JourneyStrategy;
+  timetableMatched: boolean;
+  /**
+   * Set when no Metro-only route exists. Names the lines serving each end and
+   * why they cannot meet, instead of reporting a bare "no route found".
+   */
+  unreachable?: MetroUnreachable;
+  warnings: string[];
+}
+
+export interface MetroUnreachable {
+  sourceLines: string[];
+  destinationLines: string[];
+  /** Lines that have no shared station with any other line in the source data. */
+  isolatedLines: string[];
+  reason: string;
+}
+
+export interface MetroNetworkLine {
+  line: string;
+  name: string | null;
+  stationCount: number;
+  firstStop: string | null;
+  lastStop: string | null;
+  stationsWithCode: number;
+  hasTimetable: boolean;
+  /** False when the line shares no station with any other line. */
+  connected: boolean;
+  /** Index of the connected group this line belongs to. */
+  component: number;
+}
+
+export interface MetroNetworkInterchange {
+  station: string;
+  stationCode: string | null;
+  lines: string[];
+}
+
+export interface MetroNetworkResponse {
+  lines: MetroNetworkLine[];
+  interchanges: MetroNetworkInterchange[];
+  connectivity: {
+    /** True only when every line can reach every other line. */
+    allLinesConnected: boolean;
+    componentCount: number;
+    /** Lines with no shared station, which therefore need a surface connection. */
+    isolatedLines: string[];
+    components: { id: number; lines: string[] }[];
+    note: string;
+  };
+  platformData: {
+    available: boolean;
+    note: string;
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -67,6 +67,21 @@ export const metroStationListQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
+/**
+ * Ferry and tram route listings.
+ *
+ * `status` is a free-form filter rather than an enum, because the source data
+ * carries values such as OPERATIONAL, SUSPENDED and CANCELLED and the set is
+ * expected to grow. The repository compares case-insensitively.
+ */
+export const ferryRouteListQuerySchema = z.object({
+  status: z.string().trim().min(1).max(30).optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+export const tramRouteListQuerySchema = ferryRouteListQuerySchema;
+
 /** Service days and directions come straight from the supplied Metro tables. */
 const metroServiceDaySchema = z.enum(["WEEKDAY", "SATURDAY", "SUNDAY"]);
 const metroDirectionSchema = z.enum(["UP", "DOWN"]);
@@ -103,6 +118,15 @@ export const metroStationTimetableQuerySchema = z.object({
 export const modeQuerySchema = z.object({
   mode: z.enum(["ALL", ...TRANSPORT_MODES]).default("ALL"),
   limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+/** Ghat and tram-stop search, matching the metro search shape. */
+export const ferrySearchQuerySchema = modeQuerySchema.extend({
+  q: z.string().trim().min(1, "q must not be empty").max(120),
+});
+
+export const tramSearchQuerySchema = modeQuerySchema.extend({
+  q: z.string().trim().min(1, "q must not be empty").max(120),
 });
 
 /** Route numbers contain letters, hyphens, slashes and spaces, so stay permissive. */
@@ -154,6 +178,30 @@ export const journeyRequestSchema = z
   });
 
 export type JourneyBody = z.infer<typeof journeyRequestSchema>;
+
+// POST /api/metro/journey
+//
+// Deliberately has no `mode`: this endpoint plans on Metro only, so accepting a
+// mode would let a caller ask for a bus journey from a Metro endpoint and get a
+// confusing answer instead of a Metro one.
+export const metroJourneyRequestSchema = z
+  .object({
+    source: z.string().trim().min(1, "source is required").max(120),
+    destination: z.string().trim().min(1, "destination is required").max(120),
+    strategy: z.enum(["MIN_TIME", "MIN_INTERCHANGE"]).default("MIN_TIME"),
+    /** ISO-8601 date-time, or "HH:MM" for a time-only request. */
+    departureTime: z.string().trim().min(1).max(40).optional(),
+    timetableAware: z
+      .union([z.boolean(), z.string()])
+      .transform((value) => (typeof value === "boolean" ? value : ["1", "true", "yes"].includes(value.toLowerCase())))
+      .default(true),
+  })
+  .refine((value) => value.source.toLowerCase() !== value.destination.toLowerCase(), {
+    message: "source and destination must be different",
+    path: ["destination"],
+  });
+
+export type MetroJourneyBody = z.infer<typeof metroJourneyRequestSchema>;
 
 // ---------------------------------------------------------------------------
 // Admin

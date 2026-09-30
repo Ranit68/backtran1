@@ -75,6 +75,18 @@ export interface TimetableIndex {
   metroLinesWithoutTimetable: string[];
 }
 
+/**
+ * Where a reader should look for timetable coverage for each mode. Used to point
+ * journey warnings at the endpoint that actually describes the modes involved,
+ * instead of always naming the bus one.
+ */
+const DIAGNOSTICS_ENDPOINT: Record<TransportMode, string> = {
+  BUS: "GET /api/bus/diagnostics",
+  METRO: "GET /api/metro/diagnostics",
+  FERRY: "GET /api/ferry/diagnostics",
+  TRAM: "GET /api/tram/diagnostics",
+};
+
 export class JourneyService {
   async plan(request: JourneyOptions & { source: string; destination: string }): Promise<JourneyResponse> {
     const strategy: JourneyStrategy = request.strategy ?? "MIN_TIME";
@@ -189,15 +201,19 @@ export class JourneyService {
     const totalDistanceKm = computeTotalDistanceKm(segments);
     if (totalDistanceKm === null) {
       warnings.push(
-        "totalDistanceKm is omitted because the bus and metro source data contains no stop coordinates. " +
+        "totalDistanceKm is omitted because the source data for " +
+          `${modesUsed.join(", ")} carries no stop coordinates. ` +
           "It will be reported once a coordinate source is added.",
       );
     }
 
     if (!timetableMatched && timetableAware) {
+      // Point at the diagnostics endpoint for the modes actually in this journey.
+      // Sending a ferry-only reader to /api/bus/diagnostics is not useful.
+      const endpoints = [...new Set(modesUsed.map((mode) => DIAGNOSTICS_ENDPOINT[mode]))].sort();
       warnings.push(
         "No scheduled departure could be matched for this journey, so all timings are static estimates. " +
-          "See GET /api/bus/diagnostics for timetable coverage.",
+          `See ${endpoints.join(", ")} for timetable coverage.`,
       );
     }
     if (graph.data.stats.placeholderStopsExcluded > 0) {
@@ -338,6 +354,17 @@ export class JourneyService {
       fromHop: number;
       toHop: number;
       totalHops: number;
+      /**
+       * Travel time accumulated from the real edge weights of the legs actually
+       * traversed.
+       *
+       * This must not be reconstructed from the hop numbers afterwards. A
+       * recorded leg carries its own duration -- the ferry hops of one route
+       * range from 6 to 20 minutes -- so a route's average hop time times a hop
+       * count is not the same sum, and a route whose legs are split across
+       * several travel directions is not one linear sequence at all.
+       */
+      minutes: number;
     } | null = null;
 
     const flushRide = (): void => {
@@ -403,10 +430,12 @@ export class JourneyService {
           fromHop: Math.min(rideEdge.fromHop, rideEdge.toHop),
           toHop: Math.max(rideEdge.fromHop, rideEdge.toHop),
           totalHops: rideEdge.totalHops,
+          minutes: edgeTimeMinutes(rideEdge),
         };
       } else if (currentRide) {
         currentRide.nodeIds.push(rideEdge.toNodeId);
         currentRide.toHop = Math.max(currentRide.toHop, Math.max(rideEdge.fromHop, rideEdge.toHop));
+        currentRide.minutes += edgeTimeMinutes(rideEdge);
       }
     }
     flushRide();
@@ -451,6 +480,7 @@ export class JourneyService {
       fromHop: number;
       toHop: number;
       totalHops: number;
+      minutes: number;
     },
     context: { timetable: TimetableIndex; requestMinutes: number | null; warnings: string[] },
     clockMinutes: number[],
@@ -459,7 +489,9 @@ export class JourneyService {
       .map((nodeId) => graph.getNode(nodeId)?.name ?? nodeId)
       .filter((name, index, all) => index === 0 || name !== all[index - 1]);
 
-    const staticMinutes = this.staticSegmentMinutes(graph, ride);
+    // The sum of the traversed legs' own weights, already available from the walk
+    // over the path. See the note on `currentRide.minutes`.
+    const staticMinutes = Math.max(1, Math.round(ride.minutes));
 
     const segment: JourneySegment = {
       mode: ride.mode,
@@ -671,17 +703,6 @@ export class JourneyService {
       if (key.toLowerCase().replace(/[^a-z0-9]+/g, "") === normalized) return rows;
     }
     return [];
-  }
-
-  /** Sum of the graph's per-hop estimates for this segment. */
-  private staticSegmentMinutes(
-    graph: Awaited<ReturnType<typeof getGraph>>,
-    ride: { routeId: string; fromHop: number; toHop: number },
-  ): number {
-    const route = graph.data.routes.get(ride.routeId);
-    const hops = Math.max(1, ride.toHop - ride.fromHop);
-    if (!route) return hops * 3;
-    return Math.max(1, Math.round(route.minutesPerHop * hops));
   }
 }
 

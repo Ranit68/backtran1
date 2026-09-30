@@ -1,18 +1,19 @@
 import * as ferryRepository from "../repositories/ferry.repository.js";
+import * as tramRepository from "../repositories/tram.repository.js";
 import { isMetroConfigured } from "../repositories/metro.repository.js";
 import { getMetroService } from "./metro.service.js";
-import { AppError, ErrorCode } from "../utils/errors.js";
 
 /**
  * Mode facades used by the controllers.
  *
- * Metro is implemented: the four Metro tables exist in the database and hold a
- * complete station list plus 1,720 real scheduled trips, so its handlers return
- * real data.
+ * Metro, Ferry and Tram are all implemented against imported tables, so their
+ * handlers return real data. Each facade is a thin pass-through: validation,
+ * paging and diagnostics live in the repository, which keeps the controllers
+ * free of data-access detail.
  *
- * Ferry is still reserved with no data in this build, and keeps passing its
- * repository errors through so clients get the standard error envelope with
- * HTTP 501 rather than an empty list that would imply "Kolkata has no ferries".
+ * Ferry and Tram degrade independently. If either data set fails to load the
+ * affected facade reports that, while bus and metro routing is unaffected --
+ * an optional mode must not take the whole API down.
  */
 
 export const MetroService = {
@@ -51,15 +52,49 @@ export const MetroService = {
 };
 
 export const FerryService = {
-  listRoutes: () => ferryRepository.listFerryRoutes(),
-  getRoute: (routeNo: string) => ferryRepository.getFerryRoute(routeNo),
-  getStops: (routeNo: string) => ferryRepository.getFerryRouteStops(routeNo),
-  getTimetable: (routeNo: string) => ferryRepository.getFerryRouteTimetable(routeNo),
+  listRoutes: (filter: { status?: string; limit: number; offset: number }) =>
+    ferryRepository.listFerryRoutes(filter),
+  countRoutes: (status?: string) => ferryRepository.countFerryRoutes(status),
+  getRoute: (routeId: string) => ferryRepository.getFerryRoute(routeId),
+  getGhats: () => ferryRepository.getFerryGhats(),
+  getRouteLegs: (routeId: string) => ferryRepository.getFerryRouteLegs(routeId),
+  getRouteSchedules: (routeId: string) => ferryRepository.getFerryRouteSchedules(routeId),
+  getRouteFare: (routeId: string) => ferryRepository.getFerryRouteFare(routeId),
+  getSources: () => ferryRepository.getFerrySources(),
+  searchGhats: (term: string, limit: number) => ferryRepository.searchFerryGhats(term, limit),
   isConfigured: () => ferryRepository.isFerryConfigured(),
-  status: () => {
-    throw new AppError(
-      ErrorCode.FERRY_NOT_CONFIGURED,
-      ferryRepository.FERRY_NOT_CONFIGURED_MESSAGE,
-    );
-  },
+  diagnostics: () => ferryRepository.getFerryDiagnostics(),
+  requiredTables: [
+    "ferry_routes",
+    "ferry_ghats",
+    "ferry_legs",
+    "ferry_schedules",
+    "ferry_fares",
+    "ferry_sources",
+  ] as const,
+};
+
+export const TramService = {
+  listRoutes: (filter: { status?: string; limit: number; offset: number }) =>
+    tramRepository.listTramRoutes(filter),
+  countRoutes: (status?: string) => tramRepository.countTramRoutes(status),
+  getRoute: (routeId: string) => tramRepository.getTramRoute(routeId),
+  getRouteStops: (routeId: string) => tramRepository.getTramRouteStops(routeId),
+  getRouteLegs: (routeId: string) => tramRepository.getTramRouteLegs(routeId),
+  getRouteServices: (routeId: string) => tramRepository.getTramRouteServices(routeId),
+  listHeritageServices: () => tramRepository.listTramHeritageServices(),
+  listExcludedHistoricalRoutes: () => tramRepository.listTramExcludedHistoricalRoutes(),
+  getSources: () => tramRepository.getTramSources(),
+  searchStops: (term: string, limit: number) => tramRepository.searchTramStops(term, limit),
+  isConfigured: () => tramRepository.isTramConfigured(),
+  diagnostics: () => tramRepository.getTramDiagnostics(),
+  requiredTables: [
+    "tram_routes",
+    "tram_stops",
+    "tram_legs",
+    "tram_services",
+    "tram_heritage_services",
+    "tram_excluded_historical_routes",
+    "tram_sources",
+  ] as const,
 };

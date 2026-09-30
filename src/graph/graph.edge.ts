@@ -24,6 +24,16 @@ export interface RideEdgeInput {
   fromHop: number;
   toHop: number;
   totalHops: number;
+  /**
+   * Whether to also emit the reverse edge. Defaults to true.
+   *
+   * Bus and Metro supply one ordered stop list per route with no direction
+   * column, so both travel directions have to be modelled from that single
+   * list. Ferry and Tram do not: `ferry_legs` and `tram_legs` already carry an
+   * explicit row per direction, so reversing them here would double every
+   * segment. Those callers pass false and get exactly the edges recorded.
+   */
+  bidirectional?: boolean;
 }
 
 export interface RideEdge extends GraphEdge {
@@ -52,6 +62,10 @@ export function createRideEdges(input: RideEdgeInput): RideEdge[] {
   // direction column, so a vehicle is modelled as running both ways along its
   // own stop sequence. This is a modelling assumption about direction, not
   // invented data; every stop name and order is exactly as supplied.
+  // Ferry and Tram legs arrive already direction-specific, so they pass
+  // bidirectional: false and keep exactly the edges their tables record.
+  if (input.bidirectional === false) return [forward];
+
   const backward: RideEdge = {
     ...forward,
     fromNodeId: input.toNodeId,

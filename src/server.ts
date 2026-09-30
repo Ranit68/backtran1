@@ -25,6 +25,15 @@ async function main(): Promise<void> {
         { nodes: graph.nodeCount, edges: graph.data.stats.edgeCount, durationMs: graph.data.stats.buildDurationMs },
         "transport graph ready",
       );
+
+      // Specification section 20. Logs warnings for data-quality problems and never
+      // throws, so a bad ferry or tram row cannot stop the server from serving the
+      // modes that are fine.
+      const { validateStartupData } = await import("./services/startup-validation.js");
+      const report = await validateStartupData(graph, app.log);
+      if (report.ok) {
+        app.log.info("startup data validation: ferry and tram data passed all checks");
+      }
     } catch (error) {
       app.log.error({ err: error }, "graph warm-up failed; it will be retried on the first journey request");
     }

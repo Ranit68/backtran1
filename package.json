@@ -2,7 +2,7 @@
   "name": "transport-backend",
   "version": "1.0.0",
   "private": true,
-  "description": "Kolkata Multi-Modal Transport Platform - Backend REST API (Bus + Metro; Ferry adapter reserved, Tram retired)",
+  "description": "Kolkata Multi-Modal Transport Platform - Backend REST API (Bus, Metro, Ferry and Tram)",
   "type": "module",
   "engines": {
     "node": ">=20.11.0"

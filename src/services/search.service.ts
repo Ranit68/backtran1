@@ -11,6 +11,12 @@ import {
 } from "../repositories/metro.repository.js";
 import { type TransportMode } from "../types/transport.js";
 import { scoreSearchMatch, normalizeStopName, buildStopNodeId } from "../utils/normalize.js";
+import {
+  getFerryGhatOperators,
+  searchFerryGhatNames,
+} from "../repositories/ferry.repository.js";
+import { getTramDistinctStops, searchTramStops, TRAM_OPERATOR } from "../repositories/tram.repository.js";
+import type { TramStopRow } from "../models/tram.model.js";
 import { requireDatabase } from "../repositories/base.repository.js";
 import { isPlaceholderStop } from "../graph/graph.node.js";
 
@@ -60,6 +66,17 @@ export interface SearchOptions {
   minScore?: number;
 }
 
+/**
+ * One searchable place, before scoring. `routeCount` is the number of routes
+ * serving it, which breaks ties between a well-served stop and a obscure halt.
+ */
+interface SearchCandidate {
+  name: string;
+  operator: string;
+  routeCount: number;
+  mode: TransportMode;
+}
+
 export class SearchService {
   /**
    * Ranks stops for a query.
@@ -76,13 +93,17 @@ export class SearchService {
     const limit = options.limit ?? 20;
     const minScore = options.minScore ?? 0.35;
 
-    type Candidate = { name: string; operator: string; routeCount: number; mode: TransportMode };
+    type Candidate = SearchCandidate;
 
     const wantsBus = mode === "ALL" || mode === "BUS";
     const wantsMetro = mode === "ALL" || mode === "METRO";
+    const wantsFerry = mode === "ALL" || mode === "FERRY";
+    const wantsTram = mode === "ALL" || mode === "TRAM";
 
     const busCandidates: Candidate[] = [];
     const metroCandidates: Candidate[] = [];
+    const ferryCandidates: Candidate[] = [];
+    const tramCandidates: Candidate[] = [];
 
     if (wantsBus) {
       const rows = await searchBusStops(q, Math.max(limit * 4, 50));
@@ -104,10 +125,38 @@ export class SearchService {
       }
     }
 
+    if (wantsFerry) {
+      // Names come from the ferry legs rather than the `ferry_ghats` master table,
+      // which is missing an endpoint the legs use (F003's "Babughat / Chandpal
+      // Ghat"). A master-table-backed search would hide a ghat the graph can route
+      // to, so both the pre-filter and the fallback use the leg-derived set.
+      const names = await searchFerryGhatNames(q, Math.max(limit * 4, 50));
+      ferryCandidates.push(...(await this.toFerryCandidates(names)));
+      if (names.length === 0) {
+        const all = await getFerryGhatOperators();
+        ferryCandidates.push(...(await this.toFerryCandidates(all.map((row) => row.ghat_name))));
+      }
+    }
+
+    if (wantsTram) {
+      const rows = await searchTramStops(q, Math.max(limit * 4, 50));
+      tramCandidates.push(...this.toTramCandidates(rows));
+      if (rows.length === 0) {
+        tramCandidates.push(
+          ...(await getTramDistinctStops()).map((row) => ({
+            name: row.stop_name,
+            operator: TRAM_OPERATOR,
+            routeCount: row.route_count,
+            mode: "TRAM" as TransportMode,
+          })),
+        );
+      }
+    }
+
     const scored: SearchResult[] = [];
     const seen = new Set<string>();
 
-    for (const candidate of [...busCandidates, ...metroCandidates]) {
+    for (const candidate of [...busCandidates, ...metroCandidates, ...ferryCandidates, ...tramCandidates]) {
       if (isPlaceholderStop(candidate.name)) continue;
       const score = scoreSearchMatch(q, candidate.name);
       if (score === null || score < minScore) continue;
@@ -165,6 +214,62 @@ export class SearchService {
       routeCount: row.line_count,
       mode: "METRO",
     };
+  }
+
+  /**
+   * A ghat is a place, but a graph node is (FERRY, operator, name), and a ghat
+   * can be served by more than one operator. One candidate per operator is
+   * emitted so each returned nodeId exists in the graph; the scoring loop then
+   * collapses them into a single result carrying the mode list, exactly as it
+   * does for a bus stop served by several companies.
+   *
+   * A ghat with no operational route yields no candidate, because it has no
+   * node to ride from.
+   */
+  private async toFerryCandidates(ghatNames: string[]): Promise<SearchCandidate[]> {
+    if (ghatNames.length === 0) return [];
+    const index = await getFerryGhatOperators();
+    const byName = new Map(index.map((row) => [row.ghat_name, row.operators]));
+
+    const candidates: SearchCandidate[] = [];
+    for (const ghatName of ghatNames) {
+      const operators = byName.get(ghatName);
+      if (!operators || operators.length === 0) continue;
+      for (const operator of operators) {
+        candidates.push({
+          name: ghatName,
+          operator,
+          routeCount: 1,
+          mode: "FERRY",
+        });
+      }
+    }
+    return candidates;
+  }
+
+  /**
+   * `searchTramStops` returns one row per route and direction, so the same
+   * physical stop arrives repeatedly. Deduplicating by name and counting the
+   * routes that serve it makes Esplanade outrank an obscure single-route halt,
+   * which is the same signal the bus and metro mappers rely on.
+   */
+  private toTramCandidates(rows: TramStopRow[]): SearchCandidate[] {
+    const byName = new Map<string, SearchCandidate>();
+    for (const row of rows) {
+      if (isPlaceholderStop(row.stop_name)) continue;
+      const existing = byName.get(row.stop_name);
+      if (existing) {
+        existing.routeCount += 1;
+      } else {
+        byName.set(row.stop_name, {
+          name: row.stop_name,
+          operator: TRAM_OPERATOR,
+          routeCount: 1,
+          mode: "TRAM",
+        });
+      }
+    }
+    return [...byName.values()];
   }
 }
 

@@ -27,51 +27,89 @@ describe("GET /api/health", () => {
   it("returns 200 and reports every active mode, even with no database", async () => {
     const response = await app.inject({ method: "GET", url: "/api/health" });
 
+    // Still 200: a health check that goes 5xx gets the deployment killed.
     expect(response.statusCode).toBe(200);
     const body = response.json();
     expect(body.success).toBe(true);
-    expect(body.data.status).toBe("ok");
+    // "degraded" rather than "ok" because there is no database and so nothing can
+    // be routed. The status field is allowed to be unhappy; the HTTP code is not.
+    expect(body.data.status).toBe("degraded");
     expect(body.data.components.database.configured).toBe(false);
     expect(body.data.modes.BUS.implemented).toBe(true);
     expect(body.data.modes.METRO.implemented).toBe(true);
     // Present as an implemented endpoint, but with no database it has no data
     // behind it, which the flag states rather than implies.
     expect(body.data.modes.METRO.configured).toBe(false);
-    expect(body.data.modes.FERRY.implemented).toBe(false);
   });
 
-  it("reports Tram as retired rather than implemented", async () => {
+  it("reports Ferry and Tram as implemented modes, not reserved ones", async () => {
     const response = await app.inject({ method: "GET", url: "/api/health" });
 
     const body = response.json();
-    expect(body.data.modes.TRAM).toBeUndefined();
-    expect(body.data.retiredModes.TRAM).toBeTypeOf("string");
+    expect(body.data.modes.FERRY.implemented).toBe(true);
+    expect(body.data.modes.TRAM.implemented).toBe(true);
+    // Neither is a live data source without a database, and the health payload
+    // says so rather than implying otherwise.
+    expect(body.data.modes.FERRY.configured).toBe(false);
+    expect(body.data.modes.TRAM.configured).toBe(false);
+  });
+
+  it("no longer reports Tram under retiredModes", async () => {
+    const response = await app.inject({ method: "GET", url: "/api/health" });
+
+    const body = response.json();
+    // The tram network is in operation, so there is no retired-mode entry for it.
+    expect(body.data.retiredModes?.TRAM).toBeUndefined();
   });
 });
 
-describe("retired Tram surface", () => {
-  it("answers every old endpoint with 410 rather than 404", async () => {
+describe("live Tram surface", () => {
+  it("routes every documented endpoint to a data layer instead of a 410 stub", async () => {
     for (const url of [
       "/api/tram/routes",
-      "/api/tram/routes/26",
-      "/api/tram/routes/26/stops",
+      "/api/tram/routes/5",
+      "/api/tram/routes/5/stops",
+      "/api/tram/routes/TRAM25/legs",
       "/api/tram/search?q=esplanade",
-      "/api/tram/anything/else",
+      "/api/ferry/routes",
+      "/api/ferry/ghats",
     ]) {
       const response = await app.inject({ method: "GET", url });
 
-      expect(response.statusCode, url).toBe(410);
+      // 503 is the documented answer with no DATABASE_URL. The point of these
+      // assertions is that the status is NOT 410: the endpoints are real, and the
+      // only thing missing is the database.
+      expect(response.statusCode, url).not.toBe(410);
+      expect(response.statusCode, url).not.toBe(501);
+      expect(response.statusCode, url).toBe(503);
       const body = response.json();
       expect(body.success, url).toBe(false);
-      expect(body.error.code, url).toBe("TRAM_SERVICE_WITHDRAWN");
+      expect(body.error.code, url).toBe("DATABASE_NOT_CONFIGURED");
     }
   });
 
-  it("answers non-GET methods on the same wildcard", async () => {
+  it("serves the Tram status route so a client can explain itself without data", async () => {
+    const response = await app.inject({ method: "GET", url: "/api/tram/status" });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.data.implemented).toBe(true);
+    expect(body.data.configured).toBe(false);
+  });
+
+  it("answers an unknown Tram path with 404 rather than 410", async () => {
+    const response = await app.inject({ method: "GET", url: "/api/tram/anything/else" });
+
+    // There is no wildcard route any more: the surface is an ordinary router, so
+    // a path that does not exist is genuinely not found.
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe("NOT_FOUND");
+  });
+
+  it("answers a non-GET method on a GET-only Tram path with 404", async () => {
     const response = await app.inject({ method: "POST", url: "/api/tram/routes" });
 
-    expect(response.statusCode).toBe(410);
-    expect(response.json().error.code).toBe("TRAM_SERVICE_WITHDRAWN");
+    expect(response.statusCode).toBe(404);
   });
 });
 
@@ -168,10 +206,22 @@ describe("Metro and Ferry", () => {
     expect(body.data.requiredTables).toContain("metro_timetable_checkpoints");
   });
 
-  it("returns 501 for a Ferry endpoint", async () => {
+  it("treats a Ferry data endpoint as implemented, not as a missing mode", async () => {
     const response = await app.inject({ method: "GET", url: "/api/ferry/routes" });
-    expect(response.statusCode).toBe(501);
-    expect(response.json().error.code).toBe("FERRY_NOT_CONFIGURED");
+
+    // 503 rather than 501: the ferry data set is loaded and the endpoints are
+    // implemented, so with no DATABASE_URL the fault is the missing connection.
+    expect(response.statusCode).toBe(503);
+    expect(response.json().error.code).toBe("DATABASE_NOT_CONFIGURED");
+  });
+
+  it("serves the Ferry status route so a client can explain itself without data", async () => {
+    const response = await app.inject({ method: "GET", url: "/api/ferry/status" });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.data.implemented).toBe(true);
+    expect(body.data.configured).toBe(false);
   });
 });
 
