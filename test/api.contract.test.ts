@@ -314,15 +314,51 @@ describe("vercel.json routing", () => {
     outputDirectory?: string;
     functions?: Record<string, { includeFiles?: string[] }>;
     rewrites?: { source: string; destination: string }[];
+    routes?: { src: string; dest: string }[];
   };
   const rewrites = config.rewrites ?? [];
+  const routes = config.routes ?? [];
   const entryPoint = "api/index.ts";
 
-  it("runs the build, because outputDirectory is invalid without one", () => {
-    // Setting outputDirectory alongside buildCommand: null failed the build
-    // outright, so the two have to agree. The build is only used for its
-    // side effect of completing the deployment; nothing on Vercel reads dist/.
-    expect(config.buildCommand).toBe("npm run build");
+  it("routes with `routes`, not `rewrites`, so the root reaches the function", () => {
+    // `rewrites` are applied after Vercel resolves the filesystem, and "/" asks
+    // the output root for an index.html that is not there. Vercel answers that
+    // itself with a text/plain 500 and never invokes the function, while every
+    // other path misses the lookup, falls through the catch-all and renders. So
+    // the one URL a browser opens first was the one URL that could not work, and
+    // it looked like a broken link rather than a missing root.
+    //
+    // `routes` are matched in order and, with no `handle: filesystem` entry, run
+    // before the filesystem is consulted at all. Setting outputDirectory to
+    // public/ was the other way to give the lookup something to find; it was
+    // rejected by the build, with and without a build command.
+    expect(routes.length).toBeGreaterThan(0);
+    expect(rewrites).toEqual([]);
+  });
+
+  it("sends every route to the single function", () => {
+    // Two entry points would mean two copies of the cached Fastify instance and
+    // two separate Postgres pools.
+    for (const route of routes) {
+      expect(route.dest).toBe(`/${entryPoint}`);
+    }
+  });
+
+  it("matches API paths before the catch-all", () => {
+    // Vercel applies the first matching rule and only the first, so the
+    // catch-all has to come last. If it were first it would swallow /api/* and
+    // route API calls through the frontend fallback.
+    const apiIndex = routes.findIndex((r) => r.src.startsWith("/api"));
+    const catchAllIndex = routes.findIndex((r) => r.src !== "/api/(.*)");
+    expect(apiIndex).toBe(0);
+    expect(catchAllIndex).toBeGreaterThan(apiIndex);
+  });
+
+  it("catches the bare root with a pattern that matches an empty path", () => {
+    // "/.*" matches "/" and every path under it. A pattern like "/:path*" does
+    // not behave the same way in the legacy form, and the bare root has to be
+    // covered explicitly or it falls back to the filesystem that cannot serve it.
+    expect(routes.some((r) => r.src === "/.*")).toBe(true);
   });
 
   it("keeps the entry point out of the TypeScript build output", () => {
@@ -351,54 +387,4 @@ describe("vercel.json routing", () => {
     expect(FRONTEND_HTML.length).toBeGreaterThan(0);
   });
 
-  it("publishes public/ so the site root resolves", () => {
-    // Vercel resolves the filesystem before it applies any rewrite, and "/" asks
-    // the output directory for an index.html. With no outputDirectory the output
-    // root is the repo root, which has no index.html, so Vercel answered the
-    // site root with its own text/plain 500 and never invoked the function. Every
-    // other path missed that lookup, fell through to the catch-all and rendered,
-    // which made it look like one broken link rather than a missing root.
-    expect(config.outputDirectory).toBe("public");
-  });
-
-  it("has no standalone root rewrite, because the catch-all already covers it", () => {
-    // A rule with source "/" changed nothing: Vercel never got as far as
-    // comparing rewrites for "/", so the 500 survived removing it. The catch-all
-    // matches zero or more segments and covers "/" on its own.
-    expect(rewrites.map((r) => r.source)).not.toContain("/");
-    expect(rewrites.map((r) => r.source)).toContain("/:path*");
-  });
-
-  it("routes deep links to the entry point so a reload lands on the app", () => {
-    expect(rewrites.map((r) => r.source)).toContain("/:path*");
-  });
-
-  it("sends every rewrite to the single function", () => {
-    // Two entry points would mean two copies of the cached Fastify instance and
-    // two separate Postgres pools.
-    for (const rewrite of rewrites) {
-      expect(rewrite.destination).toBe(`/${entryPoint}`);
-    }
-  });
-
-  it("matches API paths before the catch-all", () => {
-    // Vercel applies the first matching rewrite and only the first, so the
-    // catch-all has to come last. If it were first it would swallow /api/* and
-    // route API calls through the frontend fallback.
-    const apiIndex = rewrites.findIndex((r) => r.source.startsWith("/api"));
-    const catchAllIndex = rewrites.findIndex((r) => r.source === "/:path*");
-    expect(apiIndex).toBeGreaterThanOrEqual(0);
-    expect(catchAllIndex).toBeGreaterThanOrEqual(0);
-    expect(apiIndex).toBeLessThan(catchAllIndex);
-  });
-
-  it("bundles the frontend into the function, since the host serves no files", async () => {
-    // src/frontend.ts serves the page from the embedded copy, so the bundle has
-    // to carry it. This asserts the page actually made it in, which is what a
-    // missing file looks like from the outside: every page request 500s while
-    // every API request still succeeds.
-    const { FRONTEND_HTML } = await import("../src/frontend-html.generated.js");
-    expect(FRONTEND_HTML).toContain("<!doctype html>");
-    expect(FRONTEND_HTML.length).toBeGreaterThan(1000);
-  });
 });
