@@ -131,6 +131,15 @@ a{color:var(--metro)}
 .tab[aria-selected="true"]{
   background:var(--ink); border-color:var(--ink); color:#fff; box-shadow:var(--e1h);
 }
+/* The two service tabs carry their mode colour, so the nav reads as a map of
+   the network rather than six interchangeable labels. */
+.tab--ferry::before,.tab--tram::before{
+  content:""; width:7px; height:7px; border-radius:50%; flex:none;
+}
+.tab--ferry::before{background:var(--ferry)}
+.tab--tram::before{background:var(--tram)}
+.tab--ferry[aria-selected="true"]{background:var(--ferry); border-color:var(--ferry)}
+.tab--tram[aria-selected="true"]{background:var(--tram); border-color:var(--tram)}
 
 /* ---------------- panels & cards ---------------- */
 main.wrap{padding-top:var(--sp-lg); padding-bottom:72px}
@@ -349,6 +358,64 @@ textarea:focus{outline:none; border-color:var(--metro); box-shadow:0 0 0 3px rgb
 .mode--FERRY{background:var(--ferry-bg); border:1px solid var(--ferry-bd); color:var(--ferry-ink)}
 .mode--WALK{background:#e2e8f0; border:1px solid #cbd5e1; color:#475569}
 .mode--TAXI{background:#fef9c3; border:1px solid #fef08a; color:#854d0e}
+
+/* ---------------- fare ---------------- */
+.fare{
+  display:inline-flex; flex-direction:column; align-items:flex-start; gap:1px; flex:none;
+  padding:7px 12px; border-radius:var(--r-md);
+  background:var(--surface-lowest); border:1px solid var(--line); box-shadow:var(--e1);
+}
+.fare b{font:700 17px/1.1 var(--sign); letter-spacing:-.02em; color:var(--ink); white-space:nowrap}
+.fare small{font:600 9px/1.2 var(--sans); letter-spacing:.06em; text-transform:uppercase; color:var(--outline)}
+.fare--ferry{background:var(--ferry-bg); border-color:var(--ferry-bd)}
+.fare--ferry b{color:var(--ferry-ink)}
+.fare--ferry small{color:var(--ferry-ink); opacity:.75}
+.fare--tram{background:var(--tram-bg); border-color:var(--tram-bd)}
+.fare--tram b{color:var(--tram-ink)}
+.fare--tram small{color:var(--tram-ink); opacity:.75}
+/* An unverified fare is stated, never blank: "none quoted" and "free" must not
+   look the same, and neither may look like the field failed to load. */
+.fare--unknown{background:var(--surface-low); border-style:dashed}
+.fare--unknown b{color:var(--outline)}
+.fare--unknown small{color:var(--outline)}
+.fare--lg{padding:12px 16px}
+.fare--lg b{font-size:26px}
+.fare--lg small{font-size:10px}
+.farewrap{margin-bottom:var(--sp-sm)}
+
+/* ---------------- ferry / tram route grid ---------------- */
+.svc__head{
+  display:grid; grid-template-columns:minmax(0,1fr) auto; gap:var(--sp-lg);
+  align-items:center; margin-bottom:var(--sp-lg);
+  padding:var(--sp-xl); border-radius:var(--r-lg);
+  border:1px solid var(--line); box-shadow:var(--e1);
+}
+.svc__head--ferry{background:linear-gradient(120deg,#f0fdfa,var(--surface-lowest))}
+.svc__head--tram{background:linear-gradient(120deg,#f0fdf4,var(--surface-lowest))}
+.svc__t{margin:0 0 6px; font:800 clamp(24px,3.4vw,34px)/1.15 var(--sign); letter-spacing:-.025em}
+.svc__p{margin:0; max-width:56ch; font:400 14px/1.6 var(--sans); color:var(--ink-2)}
+.svc__grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(290px,1fr)); gap:var(--sp-md)}
+.rc{
+  display:flex; flex-direction:column; gap:10px; cursor:pointer; text-align:left;
+  padding:var(--sp-md); border-radius:var(--r-md);
+  background:var(--surface-lowest); border:1px solid var(--line); box-shadow:var(--e1);
+  transition:border-color .15s, box-shadow .15s, transform .12s;
+}
+.rc:hover{border-color:var(--line-2); box-shadow:var(--e2); transform:translateY(-2px)}
+.rc__top{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+.rc__no{
+  font:700 15px/1.2 var(--mono); letter-spacing:-.01em;
+  padding:4px 9px; border-radius:var(--r-sm); background:var(--ink); color:#fff;
+}
+.rc__nm{font:600 14px/1.35 var(--sans); color:var(--ink)}
+.rc__path{display:flex; align-items:center; gap:8px; font:500 13px/1.45 var(--sans); color:var(--ink)}
+.rc__path i{font-style:normal; color:var(--outline); flex:none}
+.rc__meta{display:flex; flex-wrap:wrap; gap:6px}
+.rc__foot{display:flex; align-items:flex-end; justify-content:space-between; gap:var(--sp-sm); margin-top:auto; padding-top:4px}
+.rc__note{font:400 11px/1.4 var(--sans); color:var(--outline)}
+@media (max-width:640px){
+  .svc__head{grid-template-columns:1fr; padding:var(--sp-lg)}
+}
 .h2{font:700 15px/1.3 var(--sign)}
 .h2, .big{letter-spacing:-.01em}
 
@@ -582,6 +649,8 @@ dialog#cfg .btn--ghost{background:var(--surface-lowest)}
 <nav class="tabs" role="tablist" aria-label="Sections">
   <button class="tab" role="tab" id="t-plan"    aria-controls="p-plan"    aria-selected="true">Plan a journey</button>
   <button class="tab" role="tab" id="t-routes"  aria-controls="p-routes"  aria-selected="false">Routes</button>
+  <button class="tab tab--ferry" role="tab" id="t-ferry" aria-controls="p-ferry" aria-selected="false">Ferry</button>
+  <button class="tab tab--tram" role="tab" id="t-tram" aria-controls="p-tram" aria-selected="false">Tram</button>
   <button class="tab" role="tab" id="t-stops"   aria-controls="p-stops"   aria-selected="false">Stops</button>
   <button class="tab" role="tab" id="t-network" aria-controls="p-network" aria-selected="false">Network</button>
 <button class="tab" role="tab" id="t-community" aria-controls="p-community" aria-selected="false">Community</button>
@@ -691,6 +760,36 @@ dialog#cfg .btn--ghost{background:var(--surface-lowest)}
     <p class="hint" id="rCount">Pick a mode and search.</p>
     <div class="list" id="rList"></div>
     <div id="rDetail" style="margin-top:16px"></div>
+  </section>
+
+  <!-- ===================== FERRY ===================== -->
+  <section class="panel" id="p-ferry" role="tabpanel" aria-labelledby="t-ferry" hidden>
+    <div class="svc__head svc__head--ferry">
+      <div>
+        <h2 class="svc__t">Hooghly River Ferry</h2>
+        <p class="svc__p">Crossings between the ghats of Howrah, Babughat and
+          central Kolkata. Fares are quoted per crossing and are verified at the
+          source, so an unquoted fare reads as unknown rather than free.</p>
+      </div>
+      <span class="mode mode--FERRY">Ferry</span>
+    </div>
+    <div class="svc__grid" id="ferryList"></div>
+    <div id="ferryDetail" style="margin-top:var(--sp-lg)"></div>
+  </section>
+
+  <!-- ===================== TRAM ===================== -->
+  <section class="panel" id="p-tram" role="tabpanel" aria-labelledby="t-tram" hidden>
+    <div class="svc__head svc__head--tram">
+      <div>
+        <h2 class="svc__t">Heritage Tramways</h2>
+        <p class="svc__p">The regular commuter tram services that cross central
+          Kolkata. Service is irregular and no fixed headway is published, so
+          timings shown anywhere in this app are estimates.</p>
+      </div>
+      <span class="mode mode--TRAM">Tram</span>
+    </div>
+    <div class="svc__grid" id="tramList"></div>
+    <div id="tramDetail" style="margin-top:var(--sp-lg)"></div>
   </section>
 
   <!-- ===================== STOPS ===================== -->
@@ -888,7 +987,7 @@ function health() {
 }
 
 /* ============================ tabs ============================ */
-var TABS = [["plan", function () {}], ["routes", loadRoutes], ["stops", function () {}], ["network", loadNetwork], ["community", function () {}], ["api", buildExplorer]];
+var TABS = [["plan", function () {}], ["routes", loadRoutes], ["ferry", function () { loadService("FERRY", "ferryList"); }], ["tram", function () { loadService("TRAM", "tramList"); }], ["stops", function () {}], ["network", loadNetwork], ["community", function () {}], ["api", buildExplorer]];
 TABS.forEach(function (t) {
   $("#t-" + t[0]).addEventListener("click", function () {
     TABS.forEach(function (x) {
@@ -1318,6 +1417,37 @@ var prettyStatus = function (s) {
  * operator, because every other field it read was undefined, and an empty
  * data-no, so opening one asked for /ferry/routes/ with no route in it.
  */
+/*
+ * Fare display.
+ *
+ * The API quotes fares two ways: fare_inr for a single verified amount, and
+ * fare_range_inr for a band such as "11-20". When both agree the range is
+ * dropped so a row never reads "Rs 6 Rs 6", and when the range differs it
+ * wins because the band is the more useful of the two.
+ *
+ * A route with no fare at all is shown as "not verified" rather than left
+ * blank. Silence would read as free, which is a claim the data does not make:
+ * F006 genuinely has no published fare, and the backend quotes it as null
+ * rather than 0 for exactly that reason.
+ */
+function fareAmount(r, mode) {
+  var single = r.fare_inr != null && r.fare_inr !== "" ? String(r.fare_inr) : "";
+  var range = r.fare_range_inr != null && r.fare_range_inr !== "" ? String(r.fare_range_inr) : "";
+  // A tram fare is per ride; only a ferry fare is per crossing. Reusing the
+  // crossing wording on a land service is the kind of small wrongness that
+  // makes a rider doubt the rest of the page.
+  var unit = mode === "FERRY" ? "per crossing" : "per ride";
+  if (range && range !== single) return { text: "\u20B9" + range, note: unit, known: true };
+  if (single) return { text: "\u20B9" + single, note: unit, known: true };
+  if (range) return { text: "\u20B9" + range, note: unit, known: true };
+  return { text: "\u2014", note: "fare not verified", known: false };
+}
+function fareChip(r, mode, big) {
+  var f = fareAmount(r, mode);
+  var cls = "fare fare--" + (f.known ? mode.toLowerCase() : "unknown") + (big ? " fare--lg" : "");
+  return '<span class="' + cls + '"><b>' + esc(f.text) + "</b><small>" + esc(f.note) + "</small></span>";
+}
+
 function ferryTramRow(r, mode) {
   var from = mode === "FERRY" ? r.from_ghat : r.from_terminal;
   var to = mode === "FERRY" ? r.to_ghat : r.to_terminal;
@@ -1326,20 +1456,68 @@ function ferryTramRow(r, mode) {
   if (r.operator) bits.push(r.operator);
   if (r.status) bits.push(prettyStatus(r.status));
   if (r.frequency_minutes) bits.push("every " + r.frequency_minutes + " min");
-  // Only when the range says something the single fare does not, otherwise
-  // F002 reads "Rs 6 · Rs 6".
-  if (r.fare_range_inr && r.fare_range_inr !== r.fare_inr) bits.push("Rs " + r.fare_range_inr);
-  else if (r.fare_inr) bits.push("Rs " + r.fare_inr);
   return '<button class="rowitem" style="--m:' + modeColor(mode) + '" data-no="' + esc(r.route_id) + '">' +
     '<span class="rt--lg">' + esc(label) + "</span>" +
     '<span style="flex:1;min-width:0"><span class="rowitem__t">' + esc(r.route_name || "") +
-      (from ? " · " + esc(from) + (to ? " → " + esc(to) : "") : "") + "</span>" +
-    '<span class="rowitem__s">' + esc(bits.join(" · ")) + "</span></span>" +
+      (from ? " \u2192 " + esc(from) + (to ? " \u2192 " + esc(to) : "") : "") + "</span>" +
+    '<span class="rowitem__s">' + esc(bits.join(" \u00b7 ")) + "</span></span>" +
+    fareChip(r, mode) +
     '<span class="pill">Open</span></button>';
 }
 
-function routeDetail(no, mode) {
-  var host = $("#rDetail");
+/*
+ * Ferry and Tram get their own panels rather than only a mode filter inside
+ * Routes. They are the two services a rider cannot infer from the metro or bus
+ * network, so they are presented as first-class routes with the fare visible
+ * on the card instead of being one row in a mixed list.
+ */
+function serviceCard(r, mode) {
+  var from = mode === "FERRY" ? r.from_ghat : r.from_terminal;
+  var to = mode === "FERRY" ? r.to_ghat : r.to_terminal;
+  var label = mode === "FERRY" ? r.route_id : (r.route_no || r.route_id);
+  var meta = [];
+  if (r.operator) meta.push(esc(r.operator));
+  if (r.status) meta.push('<span class="tag">' + esc(prettyStatus(r.status)) + "</span>");
+  if (r.frequency_minutes) meta.push('<span class="tag">every ' + esc(r.frequency_minutes) + " min</span>");
+  if (Array.isArray(r.service_days) && r.service_days.length) meta.push('<span class="tag">' + esc(r.service_days.join(", ")) + "</span>");
+  return '<button class="rc" style="--m:' + modeColor(mode) + '" data-no="' + esc(r.route_id) + '">' +
+    '<span class="rc__top"><span class="rc__no">' + esc(label) + "</span>" +
+    '<span class="mode mode--' + esc(mode) + '">' + esc(mode) + "</span></span>" +
+    '<span class="rc__nm">' + esc(r.route_name || "") + "</span>" +
+    (from ? '<span class="rc__path">' + esc(from) + " <i>\u2192</i> " + esc(to || "") + "</span>" : "") +
+    '<span class="rc__meta">' + meta.join("") + "</span>" +
+    '<span class="rc__foot">' + fareChip(r, mode) +
+    '<span class="rc__note">View details \u203a</span></span></button>';
+}
+
+function loadService(mode, listId) {
+  var list = $("#" + listId);
+  if (!list) return;
+  list.innerHTML = '<div class="empty"><span class="spin"></span></div>';
+  api("/" + mode.toLowerCase() + "/routes", { query: { limit: 200 } }).then(function (res) {
+    if (!res.ok || !res.json || !res.json.data) {
+      list.innerHTML = '<div class="empty">Could not load ' + esc(mode.toLowerCase()) + " routes.</div>";
+      return;
+    }
+    var d = res.json.data, items = d.items || d.routes || [];
+    if (!items.length) { list.innerHTML = '<div class="empty">No ' + esc(mode.toLowerCase()) + " routes published.</div>"; return; }
+    list.innerHTML = items.map(function (r) { return serviceCard(r, mode); }).join("");
+    Array.prototype.forEach.call(list.querySelectorAll(".rc"), function (b) {
+      b.addEventListener("click", function () {
+        var slot = $("#" + listId.replace("List", "Detail"));
+        Array.prototype.forEach.call(list.querySelectorAll(".rc"), function (o) { o.style.outline = ""; });
+        b.style.outline = "2px solid " + modeColor(mode);
+        if (slot) { slot.scrollIntoView({ block: "nearest" }); routeDetail(b.dataset.no, mode, "#" + listId.replace("List", "Detail"), "-" + listId); }
+      });
+    });
+  });
+}
+
+
+function routeDetail(no, mode, hostSel, uid) {
+  uid = uid || "";
+  var host = $(hostSel || "#rDetail");
+  if (!host) return;
   host.innerHTML = '<div class="card"><span class="spin"></span></div>';
   var p = "/" + mode.toLowerCase() + "/routes/" + encodeURIComponent(no);
 
@@ -1347,8 +1525,8 @@ function routeDetail(no, mode) {
     if (!r.ok || !r.json || !r.json.data) { host.innerHTML = ""; return errBox(host, "Route not found", r); }
     var d = r.json.data;
     if (mode === "METRO") return paintMetroRoute(host, d, no);
-    if (mode === "FERRY") return paintFerryRoute(host, d, no);
-    if (mode === "TRAM") return paintTramRoute(host, d, no);
+    if (mode === "FERRY") return paintFerryRoute(host, d, no, uid);
+    if (mode === "TRAM") return paintTramRoute(host, d, no, uid);
     return paintBusRoute(host, d, p, no);
   });
 }
@@ -1390,23 +1568,22 @@ function routeHead(d, mode, no) {
  * matter are which ghats it touches and how long each hop takes. Reading
  * data.stops here returned nothing and printed "No stop list returned."
  */
-function paintFerryRoute(host, d, no) {
+function paintFerryRoute(host, d, no, uid) {
+  uid = uid || "";
   var bits = [];
   if (d.first_departure) bits.push("first " + String(d.first_departure).slice(0, 5));
   if (d.last_departure) bits.push("last " + String(d.last_departure).slice(0, 5));
-  if (d.frequency_minutes) bits.push("every " + d.frequency_minutes + " min");
-  if (d.fare_inr) bits.push("Rs " + d.fare_inr);
-  if (d.fare_range_inr) bits.push("Rs " + d.fare_range_inr);
-  if (d.status) bits.push(prettyStatus(d.status));
+  if (d.frequency_minutes) bits.push("every " + d.frequency_minutes + " min");  if (d.status) bits.push(prettyStatus(d.status));
   if (Array.isArray(d.service_days) && d.service_days.length) bits.push(d.service_days.join(", "));
 
   var infoCard = '<div class="card card--pad"><div class="sect" style="margin-top:0">Service</div>' +
+    '<div class="farewrap">' + fareChip(d, "FERRY", true) + "</div>" +
     (bits.length ? '<div class="stop__meta">' + esc(bits.join(" · ")) + "</div>" : '<div class="empty">No service details supplied.</div>') + "</div>";
-  var legsCard = '<div class="card card--pad"><div class="sect" style="margin-top:0">Crossings</div><div id="legsBox"><span class="spin"></span></div></div>';
+  var legsCard = '<div class="card card--pad"><div class="sect" style="margin-top:0">Crossings</div><div id="legsBox' + uid + '"><span class="spin"></span></div></div>';
   host.innerHTML = routeHead(d, "FERRY", no) + infoCard + legsCard;
 
   var paint = function (legs) {
-    var box = $("#legsBox"); if (!box) return;
+    var box = $("#legsBox" + uid); if (!box) return;
     if (!legs.length) { box.innerHTML = '<div class="empty">No crossing list returned.</div>'; return; }
     var rows = legs.map(function (l) {
       return '<tr><td class="mono">' + esc(l.from_ghat || l.from || "") + "</td>" +
@@ -1425,21 +1602,21 @@ function paintFerryRoute(host, d, no) {
 }
 
 /** Tram detail. Stops arrive as a plain ordered list on the route payload. */
-function paintTramRoute(host, d, no) {
+function paintTramRoute(host, d, no, uid) {
+  uid = uid || "";
   var bits = [];
   if (d.status) bits.push(prettyStatus(d.status));
   if (d.service_type) bits.push(prettyStatus(d.service_type));
-  if (d.service_pattern) bits.push(prettyStatus(d.service_pattern));
-  if (d.fare_range_inr) bits.push("Rs " + d.fare_range_inr);
-
+  if (d.service_pattern) bits.push(prettyStatus(d.service_pattern));
   var infoCard = '<div class="card card--pad"><div class="sect" style="margin-top:0">Service</div>' +
+    '<div class="farewrap">' + fareChip(d, "TRAM", true) + "</div>" +
     (bits.length ? '<div class="stop__meta">' + esc(bits.join(" · ")) + "</div>" : '<div class="empty">No service details supplied.</div>') +
     (d.notes ? '<div class="note" style="margin-top:10px;font-size:12.5px">' + esc(d.notes) + "</div>" : "") + "</div>";
-  var stopCard = '<div class="card card--pad"><div class="sect" style="margin-top:0">Stops</div><div id="stopsBox"><span class="spin"></span></div></div>';
+  var stopCard = '<div class="card card--pad"><div class="sect" style="margin-top:0">Stops</div><div id="stopsBox' + uid + '"><span class="spin"></span></div></div>';
   host.innerHTML = routeHead(d, "TRAM", no) + infoCard + stopCard;
 
   var paint = function (stops) {
-    var box = $("#stopsBox"); if (!box) return;
+    var box = $("#stopsBox" + uid); if (!box) return;
     if (!stops.length) { box.innerHTML = '<div class="empty">No stop list returned.</div>'; return; }
     var rows = stops.map(function (s, i) {
       var nm = typeof s === "string" ? s : (s.stop_name || s.stopName || s.name || "");

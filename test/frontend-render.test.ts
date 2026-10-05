@@ -84,16 +84,20 @@ function load(...names: string[]): Record<string, unknown> {
 
 type Renderer = (item: unknown, mode: string) => string;
 
-const { ferryTramRow, busMetroRow, prettyStatus } = load(
+const { ferryTramRow, busMetroRow, prettyStatus, fareAmount, fareChip } = load(
   "esc",
   "modeColor",
   "prettyStatus",
+  "fareAmount",
+  "fareChip",
   "busMetroRow",
   "ferryTramRow"
 ) as {
   ferryTramRow: Renderer;
   busMetroRow: Renderer;
   prettyStatus: (value: unknown) => string;
+  fareAmount: (r: Record<string, unknown>, mode: string) => { text: string; note: string; known: boolean };
+  fareChip: (r: Record<string, unknown>, mode: string, big?: boolean) => string;
 };
 
 /** A trimmed copy of GET /api/ferry/routes, exactly as the API returns it. */
@@ -171,7 +175,10 @@ describe("ferry route row", () => {
   it("surfaces the operator, frequency and fare", () => {
     expect(row).toContain("WBTC/HNJPSS");
     expect(row).toContain("every 10 min");
-    expect(row).toContain("Rs 10");
+    // The fare moved out of the separator-joined meta line and into its own
+    // chip, where it is legible instead of being one item among several.
+    expect(row).toContain("\u20b910");
+    expect(row).toContain("per crossing");
   });
 
   it("renders nothing undefined for a payload with null optional fields", () => {
@@ -269,5 +276,104 @@ describe("wiring", () => {
     // The Ferry and Tram endpoints ignore ordering, so the control is hidden
     // and an empty sort must not still be sent as a parameter.
     expect(html).toContain("if (sort) query.sort = sort;");
+  });
+});
+
+describe("fare", () => {
+  const { fareAmount, fareChip, ferryTramRow, serviceCard } = load(
+    "esc",
+    "modeColor",
+    "prettyStatus",
+    "fareAmount",
+    "fareChip",
+    "ferryTramRow",
+    "serviceCard"
+  ) as {
+    fareAmount: (r: Record<string, unknown>, mode: string) => { text: string; note: string; known: boolean };
+    fareChip: (r: Record<string, unknown>, mode: string, big?: boolean) => string;
+    ferryTramRow: Renderer;
+    serviceCard: Renderer;
+  };
+
+  // Copied from live /api/ferry/routes responses.
+  const f001 = { route_id: "F001", route_name: "HOWRAH-ARMENIAN", from_ghat: "Howrah", to_ghat: "Armenian Ghat", operator: "WBTC/HNJPSS", frequency_minutes: 10, fare_inr: "10", fare_range_inr: null, status: "OPERATIONAL" };
+  const f002 = { ...f001, route_id: "F002", route_name: "HOWRAH-FAIRLIE", fare_inr: "6", fare_range_inr: "6" };
+  const f005 = { ...f001, route_id: "F005", route_name: "HOWRAH-BAGBAZAR", fare_inr: "6", fare_range_inr: "6-7" };
+  const f006 = { ...f001, route_id: "F006", route_name: "HOWRAH-KASHIPUR", fare_inr: null, fare_range_inr: null };
+
+  it("shows a single fare as an amount", () => {
+    expect(fareAmount(f001, "FERRY")).toEqual({ text: "\u20b910", note: "per crossing", known: true });
+  });
+
+  it("prefers the band when it says more than the single fare", () => {
+    // F005 quotes 6 but bands 6-7; the band is the useful half.
+    expect(fareAmount(f005, "FERRY").text).toBe("\u20b96-7");
+  });
+
+  it("does not print the same fare twice when the two fields agree", () => {
+    // F002 sends fare_inr 6 and fare_range_inr 6. Rendering both produced
+    // "Rs 6 Rs 6" in the detail panel, because only the list row had the guard.
+    const f = fareAmount(f002, "FERRY");
+    expect(f.text).toBe("\u20b96");
+    const chips = (fareChip(f002, "FERRY").match(/\u20b9/g) ?? []).length;
+    expect(chips).toBe(1);
+    for (const rendered of [ferryTramRow(f002, "FERRY"), serviceCard(f002, "FERRY")]) {
+      expect(rendered.match(/\u20b9/g) ?? []).toHaveLength(1);
+    }
+  });
+
+  it("states that a fare is unverified instead of leaving it blank", () => {
+    // Silence reads as free. F006 genuinely has no published fare, and the
+    // backend quotes null rather than 0 precisely so "unknown" is not "none".
+    const f = fareAmount(f006, "FERRY");
+    expect(f.known).toBe(false);
+    expect(f.text).toBe("\u2014");
+    expect(fareChip(f006, "FERRY")).toContain("fare not verified");
+    expect(ferryTramRow(f006, "FERRY")).toContain("fare not verified");
+  });
+
+  it("puts the fare on the row and on the card", () => {
+    for (const rendered of [ferryTramRow(f001, "FERRY"), serviceCard(f001, "FERRY")]) {
+      expect(rendered).toContain("\u20b910");
+    }
+  });
+
+  it("bills a ferry per crossing and a tram per ride", () => {
+    // A crossing is a river crossing. Reusing the wording on a land service is
+    // small, but it is the kind of detail that undermines the rest of the page.
+    expect(fareAmount(f001, "FERRY").note).toBe("per crossing");
+    expect(fareAmount({ fare_range_inr: "5-10" }, "TRAM").note).toBe("per ride");
+  });
+
+  it("marks the detail panel's fare as unknown rather than dropping it", () => {
+    // paintFerryRoute and paintTramRoute used to push both fare fields into a
+    // separator-joined string; they now render the chip instead.
+    expect(html).not.toContain('bits.push("Rs " + d.fare_inr)');
+    expect(html).not.toContain('bits.push("Rs " + d.fare_range_inr)');
+    expect(html).toContain('fareChip(d, "FERRY", true)');
+    expect(html).toContain('fareChip(d, "TRAM", true)');
+  });
+});
+
+describe("ferry and tram panels", () => {
+  it("gives each service its own tab", () => {
+    expect(html).toContain('id="t-ferry" aria-controls="p-ferry"');
+    expect(html).toContain('id="t-tram" aria-controls="p-tram"');
+    expect(html).toContain('id="p-ferry"');
+    expect(html).toContain('id="p-tram"');
+  });
+
+  it("registers both panels so the tab handler can reach them", () => {
+    // The handler loops over TABS and hides every panel it does not match, so a
+    // section without an entry would never be reachable.
+    expect(html).toContain('loadService("FERRY", "ferryList")');
+    expect(html).toContain('loadService("TRAM", "tramList")');
+  });
+
+  it("scopes the detail loading box per host", () => {
+    // A ferry detail and a routes detail can both sit in the DOM, so a bare id
+    // would be duplicated and the painter would read the wrong one.
+    expect(html).toContain('id="legsBox\' + uid + \'"');
+    expect(html).toContain('id="stopsBox\' + uid + \'"');
   });
 });
