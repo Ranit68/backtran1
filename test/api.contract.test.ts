@@ -311,6 +311,7 @@ describe("frontend", () => {
 describe("vercel.json routing", () => {
   const config = JSON.parse(readFileSync(new URL("../vercel.json", import.meta.url), "utf8")) as {
     buildCommand?: string | null;
+    outputDirectory?: string;
     functions?: Record<string, { includeFiles?: string[] }>;
     rewrites?: { source: string; destination: string }[];
   };
@@ -349,13 +350,20 @@ describe("vercel.json routing", () => {
     expect(FRONTEND_HTML.length).toBeGreaterThan(0);
   });
 
+  it("publishes public/ so the site root resolves", () => {
+    // Vercel resolves the filesystem before it applies any rewrite, and "/" asks
+    // the output directory for an index.html. With no outputDirectory the output
+    // root is the repo root, which has no index.html, so Vercel answered the
+    // site root with its own text/plain 500 and never invoked the function. Every
+    // other path missed that lookup, fell through to the catch-all and rendered,
+    // which made it look like one broken link rather than a missing root.
+    expect(config.outputDirectory).toBe("public");
+  });
+
   it("has no standalone root rewrite, because it breaks the root", () => {
-    // A rule with source "/" sends the site root to a 500 emitted by Vercel
-    // itself, with content-type text/plain, before the function is ever invoked.
-    // Every other path kept working, so it read as a deployed app with one bad
-    // link rather than a routing fault. The catch-all below matches zero or more
-    // segments and covers "/" on its own, so the extra rule only removes a path
-    // that worked.
+    // A rule with source "/" changed nothing: Vercel never got as far as
+    // comparing rewrites for "/", so the 500 survived removing it. The catch-all
+    // below matches zero or more segments and covers "/" on its own.
     expect(rewrites.map((r) => r.source)).not.toContain("/");
     expect(rewrites.map((r) => r.source)).toContain("/:path*");
   });
