@@ -218,6 +218,12 @@ main.wrap{padding-top:var(--sp-lg); padding-bottom:72px}
   font:700 11px/1 var(--sans); letter-spacing:.1em; text-transform:uppercase; color:var(--outline);
 }
 .panel>.sect:first-child{margin-top:0}
+
+/* Section subhead: a titled block with an explanatory line under it. */
+.sh{margin:var(--sp-xl) 0 var(--sp-sm)}
+.sh__t{font:700 17px/1.3 var(--sign); color:var(--ink); letter-spacing:-.01em}
+.sh__s{margin:5px 0 0; max-width:66ch; font:400 13px/1.55 var(--sans); color:var(--ink-2)}
+
 .grid2{display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-md)}
 .res{display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:var(--sp-md); align-items:start}
 @media (max-width:900px){ .grid2,.res{grid-template-columns:1fr} }
@@ -433,6 +439,7 @@ textarea:focus{outline:none; border-color:var(--metro); box-shadow:0 0 0 3px rgb
   background:var(--surface-low); border:1px dashed var(--line-2); border-radius:var(--r-md);
   font:400 13px/1.6 var(--sans); color:var(--ink-2);
 }
+.empty b{display:block; margin-bottom:5px; font:600 14px/1.35 var(--sans); color:var(--ink)}
 /* error box */
 .err{
   padding:12px var(--sp-md); border-radius:var(--r); margin:var(--sp-sm) 0;
@@ -608,6 +615,157 @@ dialog#cfg h3{font:700 20px/1.25 var(--sign); margin-bottom:6px}
 dialog#cfg p{margin:0 0 var(--sp-md); font:400 13px/1.5 var(--sans); color:var(--ink-2)}
 dialog#cfg .btn--ghost{background:var(--surface-lowest)}
 
+/* ============================================================
+   App shell. A phone is the primary device for a transit app, so
+   navigation moves to a thumb-reachable dock below 640px and the
+   horizontal tab strip is kept only where there is room for it.
+   ============================================================ */
+.dock{
+  position:fixed; left:0; right:0; bottom:0; z-index:60; display:none;
+  background:rgba(255,255,255,.94);
+  backdrop-filter:saturate(180%) blur(18px);
+  -webkit-backdrop-filter:saturate(180%) blur(18px);
+  border-top:1px solid var(--line);
+  box-shadow:0 -14px 30px -20px rgba(11,28,48,.34);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+.dock__item{
+  position:relative; flex:1 1 0; min-width:0; cursor:pointer;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+  padding:9px 2px 8px; background:none; border:0;
+  color:var(--outline);
+  font:600 10px/1 var(--sans); letter-spacing:.01em;
+  -webkit-tap-highlight-color:transparent;
+  transition:color .15s;
+}
+.dock__item svg{width:22px; height:22px; flex:none; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; opacity:.85}
+.dock__item::after{
+  content:""; position:absolute; top:4px; left:50%; width:18px; height:3px;
+  transform:translateX(-50%) scaleX(0); border-radius:var(--r-full);
+  background:var(--dockc,var(--ink)); opacity:0;
+  transition:transform .22s cubic-bezier(.2,.7,.3,1), opacity .18s;
+}
+.dock__item[aria-selected="true"],
+.dock__item[aria-current="true"],
+.dock__item[data-more="on"]{color:var(--dockc,var(--ink))}
+.dock__item[aria-selected="true"] svg,
+.dock__item[aria-current="true"] svg,
+.dock__item[data-more="on"] svg{opacity:1}
+.dock__item[aria-selected="true"]::after,
+.dock__item[aria-current="true"]::after,
+.dock__item[data-more="on"]::after{transform:translateX(-50%) scaleX(1); opacity:1}
+.dock__item:active{background:var(--surface-low)}
+.dock__label{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%}
+
+/* More sheet: the four sections that do not earn a permanent dock slot. */
+.sheet{position:fixed; inset:0; z-index:70}
+.sheet[hidden]{display:none}
+.sheet__scrim{position:absolute; inset:0; background:rgba(11,28,48,.46); animation:fade .18s ease-out}
+.sheet__panel{
+  position:absolute; left:0; right:0; bottom:0; max-height:82vh; overflow:auto;
+  background:var(--surface-lowest);
+  border-radius:22px 22px 0 0;
+  box-shadow:0 -20px 50px -20px rgba(11,28,48,.42);
+  padding:10px var(--sp-md) calc(16px + env(safe-area-inset-bottom,0px));
+  animation:slideUp .26s cubic-bezier(.2,.7,.3,1);
+}
+.sheet__grab{width:38px; height:4px; border-radius:var(--r-full); background:var(--line-2); margin:0 auto 14px}
+.sheet__t{font:700 16px/1.25 var(--sign)}
+.sheet__s{margin:4px 0 14px; font:400 12.5px/1.5 var(--sans); color:var(--ink-2)}
+.sheet__grid{display:grid; grid-template-columns:repeat(2,1fr); gap:10px}
+.sheet__item{
+  display:flex; flex-direction:column; align-items:flex-start; gap:6px; cursor:pointer;
+  padding:13px 14px; text-align:left;
+  background:var(--surface-lowest); border:1px solid var(--line); border-radius:var(--r-md);
+  color:var(--ink); box-shadow:var(--e1);
+  transition:border-color .15s, box-shadow .15s, transform .15s;
+}
+.sheet__item:hover{border-color:var(--line-2); box-shadow:var(--e2); transform:translateY(-1px)}
+.sheet__item svg{width:20px; height:20px; fill:none; stroke:var(--sheetc,var(--ink-2)); stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round}
+.sheet__item b{font:600 14px/1.25 var(--sans)}
+.sheet__item span{font:400 11.5px/1.4 var(--sans); color:var(--ink-2)}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+@keyframes slideUp{from{transform:translateY(14%); opacity:.6}to{transform:none; opacity:1}}
+
+/* ---------------- skeleton loading ----------------
+   A shimmer that matches the shape of the content reads as "loading".
+   A centred spinner reads as "something is wrong with this page". */
+.sk{
+  display:block; border-radius:8px;
+  background:linear-gradient(90deg,var(--surface-low) 25%,var(--surface-container) 37%,var(--surface-low) 63%);
+  background-size:400% 100%;
+  animation:shimmer 1.3s ease-in-out infinite;
+}
+@keyframes shimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
+.skcard{
+  display:flex; flex-direction:column; gap:10px; padding:var(--sp-md);
+  border:1px solid var(--line); border-radius:var(--r-md); background:var(--surface-lowest);
+}
+.skcard__top{display:flex; align-items:center; gap:10px}
+.skrow{
+  display:flex; align-items:center; gap:12px; padding:12px var(--sp-md);
+  border:1px solid var(--line); border-radius:var(--r-md); background:var(--surface-lowest);
+}
+.skline{flex:1}
+
+/* ---------------- departures board ----------------
+   A ferry timetable gives a first departure, a last departure and a headway,
+   which is enough to answer "when is the next one" honestly. It is not a live
+   feed, so every row is labelled with the clock time it was computed from. */
+.dep{border:1px solid var(--line); border-radius:var(--r-md); background:var(--surface-lowest); overflow:hidden}
+.dep__row{display:flex; align-items:center; gap:10px; padding:9px 12px; border-top:1px solid var(--line)}
+.dep__row:first-child{border-top:0}
+.dep__t{font:700 15px/1 var(--sign); font-variant-numeric:tabular-nums; flex:none; min-width:50px; color:var(--ink)}
+.dep__meta{font:400 11.5px/1.3 var(--sans); color:var(--outline); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.dep__in{
+  margin-left:auto; flex:none; white-space:nowrap;
+  padding:4px 10px; border-radius:var(--r-full);
+  background:var(--ferry-bg); border:1px solid var(--ferry-bd); color:var(--ferry-ink);
+  font:700 11.5px/1 var(--sans); font-variant-numeric:tabular-nums;
+}
+.dep__in--tram{background:var(--tram-bg); border-color:var(--tram-bd); color:var(--tram-ink)}
+.dep__in--due{background:var(--ferry); border-color:var(--ferry); color:#fff}
+.dep__in--due.dep__in--tram{background:var(--tram); border-color:var(--tram); color:#fff}
+.dep__cap{padding:9px 12px; background:var(--surface-low); border-top:1px solid var(--line); font:400 11.5px/1.45 var(--sans); color:var(--ink-2)}
+
+/* ---------------- policy note ----------------
+   The API publishes the reasoning behind its own limits. Surfacing it is what
+   a dependable transit app does, and it stops a blank fare reading as a bug. */
+.policy{
+  display:flex; gap:11px; padding:13px 15px; margin-top:var(--sp-sm);
+  border:1px solid var(--line); border-left:3px solid var(--pc,var(--line-2));
+  border-radius:var(--r-sm); background:var(--surface-low);
+  font:400 12.5px/1.55 var(--sans); color:var(--ink-2);
+}
+.policy b{display:block; color:var(--ink); font-weight:600; margin-bottom:2px}
+.policy__i{flex:none; width:17px; height:17px; margin-top:1px; fill:none; stroke:var(--pc,var(--outline)); stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round}
+
+/* ---------------- heritage services ----------------
+   Heritage rides are not routable commuter services, so they are shown apart
+   from the live route grid with the reason stated rather than hidden. */
+.her{display:grid; gap:var(--sp-sm); grid-template-columns:repeat(auto-fill,minmax(238px,1fr))}
+.her__card{
+  display:flex; flex-direction:column; gap:7px; padding:var(--sp-md);
+  border:1px solid var(--tram-bd); border-radius:var(--r-md);
+  background:linear-gradient(180deg,var(--tram-bg),var(--surface-lowest) 62%);
+}
+.her__n{font:700 15px/1.2 var(--sign); color:var(--tram-ink)}
+.her__d{font:500 12px/1.4 var(--sans); color:var(--ink-2)}
+.her__f{
+  align-self:flex-start; margin-top:2px; padding:4px 10px; border-radius:var(--r-full);
+  background:var(--surface-lowest); border:1px solid var(--tram-bd);
+  font:700 12px/1 var(--sans); color:var(--tram-ink);
+}
+
+/* ---------------- focus + motion ---------------- */
+:where(button,a,input,select,textarea,[tabindex]):focus-visible{outline:2px solid var(--metro); outline-offset:2px}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{
+    animation-duration:.001ms !important; animation-iteration-count:1 !important;
+    transition-duration:.001ms !important; scroll-behavior:auto !important;
+  }
+}
+
 /* ---------------- responsive ---------------- */
 @media (max-width:640px){
   :root{--sp-lg:16px}
@@ -618,11 +776,19 @@ dialog#cfg .btn--ghost{background:var(--surface-lowest)}
   .live{order:3}
   .sum{position:static}
   .card--pad{padding:var(--sp-md)}
+
+  /* The dock replaces the tab strip, which needs a sideways swipe to reach its
+     last item and puts its targets at the top of a one-handed phone screen. */
+  .tabs{display:none}
+  .dock{display:flex}
+  body{padding-bottom:calc(64px + env(safe-area-inset-bottom,0px))}
+  .dock__item{font-size:10.5px}
 }
 @media print{
-  .mast,.tabs,.mast__btn,.live,.btn{display:none}
-  body{background:#fff}
+  .mast,.tabs,.dock,.sheet,.mast__btn,.live,.btn{display:none}
+  body{background:#fff; padding-bottom:0}
 }
+
 </style>
 </head>
 
@@ -656,6 +822,58 @@ dialog#cfg .btn--ghost{background:var(--surface-lowest)}
 <button class="tab" role="tab" id="t-community" aria-controls="p-community" aria-selected="false">Community</button>
   <button class="tab" role="tab" id="t-api"     aria-controls="p-api"     aria-selected="false">API</button>
 </nav>
+
+<!-- Thumb-reachable dock. Below 640px the tab strip is display:none, so this
+     is the only navigation in the accessibility tree on a phone. -->
+<nav class="dock" id="dock" aria-label="Primary">
+  <button class="dock__item" type="button" data-go="plan" aria-current="true" style="--dockc:var(--ink)">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 21V4M6 5h11l-2.6 3.5L17 12H6"/></svg>
+    <span class="dock__label">Plan</span>
+  </button>
+  <button class="dock__item" type="button" data-go="routes" style="--dockc:var(--ink)">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+    <span class="dock__label">Routes</span>
+  </button>
+  <button class="dock__item" type="button" data-go="ferry" style="--dockc:var(--ferry)">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17c1.6 0 1.6 2 3.2 2s1.6-2 3.2-2 1.6 2 3.2 2 1.6-2 3.2-2 1.6 2 3.2 2M5 14.5 6.6 9h10.8L19 14.5M12 9V4M9.2 4h5.6"/></svg>
+    <span class="dock__label">Ferry</span>
+  </button>
+  <button class="dock__item" type="button" data-go="tram" style="--dockc:var(--tram)">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM5 11.5h14M8.5 17 7.5 20M15.5 17l1 3M9 8h2M13 8h2"/></svg>
+    <span class="dock__label">Tram</span>
+  </button>
+  <button class="dock__item" type="button" id="dockMore" data-more="off" style="--dockc:var(--ink)">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6.5v6.5H4zM13.5 4H20v6.5h-6.5zM4 13.5h6.5V20H4zM13.5 13.5H20V20h-6.5z"/></svg>
+    <span class="dock__label">More</span>
+  </button>
+</nav>
+
+<div class="sheet" id="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="sheetT">
+  <div class="sheet__scrim" id="sheetScrim"></div>
+  <div class="sheet__panel">
+    <div class="sheet__grab"></div>
+    <div class="sheet__t" id="sheetT">More</div>
+    <p class="sheet__s">The rest of the platform. These are reference and reporting tools rather than journey-planning steps.</p>
+    <div class="sheet__grid">
+      <button class="sheet__item" type="button" data-go="stops" style="--sheetc:var(--metro)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.2S19 15 19 10a7 7 0 1 0-14 0c0 5 7 11.2 7 11.2z"/><circle cx="12" cy="10" r="2.6"/></svg>
+        <b>Stops</b><span>Find any stop across all four modes</span>
+      </button>
+      <button class="sheet__item" type="button" data-go="network" style="--sheetc:var(--ok)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18.5" cy="5.5" r="2.5"/><circle cx="5.5" cy="13" r="2.5"/><circle cx="18.5" cy="20" r="2.5"/><path d="M7.8 11.8 16.2 7M7.8 14.4l8.4 4"/></svg>
+        <b>Network</b><span>Coverage, graph and data health</span>
+      </button>
+      <button class="sheet__item" type="button" data-go="community" style="--sheetc:var(--secondary)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8 8 0 0 1-8 8H8l-4.5 3 .9-4.6A8 8 0 1 1 21 11.5z"/></svg>
+        <b>Community</b><span>Live disruption reports from riders</span>
+      </button>
+      <button class="sheet__item" type="button" data-go="api" style="--sheetc:var(--outline)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 8 4.5 12l4 4M15.5 8l4 4-4 4M13.5 5l-3 14"/></svg>
+        <b>API</b><span>Every endpoint, explorable</span>
+      </button>
+    </div>
+  </div>
+</div>
 
 <main class="wrap">
 
@@ -773,7 +991,15 @@ dialog#cfg .btn--ghost{background:var(--surface-lowest)}
       </div>
       <span class="mode mode--FERRY">Ferry</span>
     </div>
+
+    <div class="sh">
+      <h3 class="sh__t">Next departures</h3>
+      <p class="sh__s">Computed from the published timetable against your device clock, not a live vehicle feed.</p>
+    </div>
+    <div id="ferryDeps"></div>
+
     <div class="svc__grid" id="ferryList"></div>
+    <div id="ferryPolicy"></div>
     <div id="ferryDetail" style="margin-top:var(--sp-lg)"></div>
   </section>
 
@@ -788,7 +1014,22 @@ dialog#cfg .btn--ghost{background:var(--surface-lowest)}
       </div>
       <span class="mode mode--TRAM">Tram</span>
     </div>
+
+    <div class="sh">
+      <h3 class="sh__t">Next departures</h3>
+      <p class="sh__s">No reliable fixed timetable is published for regular tram services, so no times are projected here.</p>
+    </div>
+    <div id="tramDeps"></div>
+
     <div class="svc__grid" id="tramList"></div>
+
+    <div class="sh">
+      <h3 class="sh__t">Heritage and special rides</h3>
+      <p class="sh__s">Weekend heritage services. They are not daily routes and are never used for journey planning.</p>
+    </div>
+    <div id="tramHeritage"></div>
+
+    <div id="tramPolicy"></div>
     <div id="tramDetail" style="margin-top:var(--sp-lg)"></div>
   </section>
 
@@ -928,6 +1169,35 @@ var esc = function (s) {
 var MODE_VAR = { BUS: "var(--bus)", METRO: "var(--metro)", FERRY: "var(--ferry)", TRAM: "var(--tram)", WALK: "var(--walk)", TRANSFER: "var(--walk)" };
 var modeColor = function (m) { return MODE_VAR[m] || "var(--mute)"; };
 
+/* Skeletons mirror the shape of what is arriving. A centred spinner in an empty
+   box reads as an error state; a grey placeholder reads as "still loading". */
+function skRows(n) {
+  var out = "";
+  for (var i = 0; i < n; i++) {
+    out += '<div class="skrow"><span class="sk" style="width:44px;height:44px;border-radius:50%"></span>' +
+      '<span class="skline"><span class="sk" style="width:52%;height:13px"></span>' +
+      '<span class="sk" style="width:34%;height:11px;margin-top:7px"></span></span></div>';
+  }
+  return out;
+}
+function skCards(n) {
+  var out = "";
+  for (var i = 0; i < n; i++) {
+    out += '<div class="skcard"><div class="skcard__top">' +
+      '<span class="sk" style="width:46px;height:22px;border-radius:6px"></span>' +
+      '<span class="sk" style="width:58%;height:13px"></span></div>' +
+      '<span class="sk" style="width:84%;height:11px"></span>' +
+      '<span class="sk" style="width:46%;height:11px"></span>' +
+      '<span class="sk" style="width:66px;height:24px;border-radius:9999px;margin-top:2px"></span></div>';
+  }
+  return out;
+}
+function skLines(n, h) {
+  var out = "";
+  for (var i = 0; i < n; i++) out += '<span class="sk" style="height:' + (h || 13) + 'px;width:' + (94 - i * 9) + '%"></span>';
+  return '<div style="display:flex;flex-direction:column;gap:9px">' + out + "</div>";
+}
+
 /* ============================ api client ============================ */
 function api(path, opt) {
   opt = opt || {};
@@ -988,15 +1258,68 @@ function health() {
 
 /* ============================ tabs ============================ */
 var TABS = [["plan", function () {}], ["routes", loadRoutes], ["ferry", function () { loadService("FERRY", "ferryList"); }], ["tram", function () { loadService("TRAM", "tramList"); }], ["stops", function () {}], ["network", loadNetwork], ["community", function () {}], ["api", buildExplorer]];
-TABS.forEach(function (t) {
-  $("#t-" + t[0]).addEventListener("click", function () {
-    TABS.forEach(function (x) {
-      var on = x[0] === t[0];
-      $("#t-" + x[0]).setAttribute("aria-selected", on ? "true" : "false");
-      $("#p-" + x[0]).hidden = !on;
-    });
-    t[1]();
+/* These four live in the More sheet on a phone instead of holding a dock slot.
+   The dock mirrors whichever one is open so the More item stays lit. */
+var MORE = ["stops", "network", "community", "api"];
+var currentTab = "plan";
+
+function selectTab(name) {
+  var row = null;
+  TABS.forEach(function (x) {
+    var on = x[0] === name;
+    if (on) row = x;
+    var t = $("#t-" + x[0]), p = $("#p-" + x[0]);
+    if (t) t.setAttribute("aria-selected", on ? "true" : "false");
+    if (p) p.hidden = !on;
   });
+  if (!row) return;
+  currentTab = name;
+  Array.prototype.forEach.call(document.querySelectorAll(".dock__item[data-go]"), function (b) {
+    b.setAttribute("aria-current", b.getAttribute("data-go") === name ? "true" : "false");
+  });
+  var more = $("#dockMore");
+  if (more) more.setAttribute("data-more", MORE.indexOf(name) > -1 ? "on" : "off");
+  row[1]();
+  window.scrollTo(0, 0);
+}
+
+TABS.forEach(function (t) {
+  $("#t-" + t[0]).addEventListener("click", function () { selectTab(t[0]); });
+});
+
+/* ---------------- bottom dock + more sheet ---------------- */
+function openSheet() {
+  var sh = $("#sheet");
+  if (!sh) return;
+  sh.hidden = false;
+  document.body.style.overflow = "hidden";
+  var f = sh.querySelector(".sheet__item");
+  if (f) f.focus();
+}
+function closeSheet() {
+  var sh = $("#sheet");
+  if (!sh || sh.hidden) return;
+  sh.hidden = true;
+  document.body.style.overflow = "";
+  var m = $("#dockMore");
+  if (m) m.focus();
+}
+var dockMore = $("#dockMore");
+if (dockMore) dockMore.addEventListener("click", function () {
+  var sh = $("#sheet");
+  if (sh && !sh.hidden) closeSheet(); else openSheet();
+});
+var sheetScrim = $("#sheetScrim");
+if (sheetScrim) sheetScrim.addEventListener("click", closeSheet);
+Array.prototype.forEach.call(document.querySelectorAll(".sheet__item"), function (b) {
+  b.addEventListener("click", function () { closeSheet(); selectTab(b.getAttribute("data-go")); });
+});
+Array.prototype.forEach.call(document.querySelectorAll(".dock__item[data-go]"), function (b) {
+  b.addEventListener("click", function () { selectTab(b.getAttribute("data-go")); });
+});
+document.addEventListener("keydown", function (e) {
+  var sh = $("#sheet");
+  if (e.key === "Escape" && sh && !sh.hidden) closeSheet();
 });
 
 /* ============================ community ============================ */
@@ -1356,7 +1679,7 @@ syncRouteSort();
 function loadRoutes() {
   var mode = $("#rMode").value, q = $("#rQ").value.trim();
   var list = $("#rList");
-  list.innerHTML = '<div class="empty"><span class="spin"></span></div>';
+  list.innerHTML = skRows(5);
   $("#rCount").textContent = "Loading…";
   // The interesting sorts are all "most X", so those read best descending.
   var sort = $("#rSort").value;
@@ -1490,10 +1813,161 @@ function serviceCard(r, mode) {
     '<span class="rc__note">View details \u203a</span></span></button>';
 }
 
+/* ============================ departures ============================
+   A published timetable gives a first departure, a last departure and a
+   headway. That is enough to answer "when is the next one" without inventing a
+   live feed. Where the data does not support a projection, the board says so
+   rather than showing a plausible-looking guess. */
+function nowMin() { var d = new Date(); return d.getHours() * 60 + d.getMinutes(); }
+function hhmmToMin(v) {
+  if (v === null || v === undefined || v === "") return null;
+  var p = String(v).split(":");
+  var n = Number(p[0]) * 60 + Number(p[1] || 0);
+  return isFinite(n) ? n : null;
+}
+function minToHHMM(m) {
+  m = ((Math.round(m) % 1440) + 1440) % 1440;
+  return String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0");
+}
+function runsToday(sched) {
+  var raw = sched && sched.service_days;
+  if (!raw) return true;
+  var days = String(raw).toUpperCase();
+  if (days.indexOf("DAILY") > -1 || days.indexOf("ALL") > -1) return true;
+  var names = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"];
+  return days.split(",").some(function (d) { return d.trim() === names[new Date().getDay()]; });
+}
+/* Returns a sorted list of minutes-from-midnight. Anything past 1440 is
+   tomorrow, which is what makes the board still correct at 11pm. */
+function projectDepartures(schedules, limit, clock) {
+  var now = clock === undefined ? nowMin() : clock, out = [];
+  (schedules || []).forEach(function (s) {
+    /* A service that does not run today must not appear on today's board. */
+    if (!runsToday(s)) return;
+    var first = hhmmToMin(s.first_departure), last = hhmmToMin(s.last_departure);
+    var freq = Number(s.frequency_minutes);
+    if (first === null || last === null || !(freq > 0)) return;
+    if (last < first) last += 1440;
+    var t, n, added = 0;
+    for (t = first, n = 0; t <= last && n < 400; t += freq, n++) {
+      if (t >= now) { out.push({ min: t }); added++; }
+    }
+    /* Nothing left today, so show tomorrow's opening departures rather than an
+       empty board at 11pm. */
+    if (!added) {
+      for (t = first, n = 0; t <= last && n < 12; t += freq, n++) out.push({ min: t + 1440 });
+    }
+  });
+  out.sort(function (a, b) { return a.min - b.min; });
+  /* Within one route, overlapping schedules can quote the same minute twice. */
+  var seen = {}, uniq = [];
+  out.forEach(function (d) { if (!seen[d.min]) { seen[d.min] = 1; uniq.push(d); } });
+  return uniq.slice(0, limit || 6);
+}
+function depCountdown(min, clock) {
+  /* Anything at or past 1440 is genuinely tomorrow. Without this check a 00:10
+     clock would call today's 08:00 departure "tomorrow". */
+  if (min >= 1440) return "tomorrow " + minToHHMM(min);
+  var delta = min - (clock === undefined ? nowMin() : clock);
+  if (delta <= 0) return "departing";
+  if (delta <= 90) return "in " + delta + " min";
+  return "in " + Math.round(delta / 60) + " hr";
+}
+function loadDepartures(mode, hostId) {
+  var host = $("#" + hostId);
+  if (!host) return;
+  host.innerHTML = '<div class="dep">' + skLines(4, 15) + "</div>";
+  api("/" + mode.toLowerCase() + "/routes", { query: { limit: 200 } }).then(function (res) {
+    if (!res.ok || !res.json || !res.json.data) { host.innerHTML = ""; return; }
+    var items = res.json.data.items || res.json.data.routes || [];
+    var names = {};
+    items.forEach(function (r) { names[r.route_id || r.route_no] = r.route_name || r.name || r.route_id; });
+    /* One timetable request per route, in parallel. These are small documents. */
+    return Promise.all(items.map(function (r) {
+      var id = r.route_id || r.route_no;
+      return api("/" + mode.toLowerCase() + "/routes/" + encodeURIComponent(id) + "/timetable")
+        .then(function (t) {
+          var data = t && t.ok && t.json && t.json.data ? t.json.data : null;
+          return projectDepartures(data ? (data.schedules || data.services || []) : [], 3)
+            .map(function (d) { return { min: d.min, id: id, name: names[id] || id }; });
+        });
+    })).then(function (groups) {
+      var all = [];
+      groups.forEach(function (g) { all = all.concat(g); });
+      all.sort(function (a, b) { return a.min - b.min; });
+      var shown = all.slice(0, 6);
+      if (!shown.length) {
+        host.innerHTML = '<div class="empty"><b>No scheduled departures to project</b>' +
+          esc(mode === "TRAM"
+            ? "Tram service is reported as irregular and no fixed headway is published, so this app will not invent a time. Check the ghat or stop for the next service."
+            : "No first departure, last departure and headway are published for this mode, so no time can be projected.") +
+          "</div>";
+        return;
+      }
+      var clock = minToHHMM(nowMin());
+      host.innerHTML = '<div class="dep">' + shown.map(function (d) {
+        var soon = d.min - nowMin() <= 20;
+        return '<div class="dep__row"><span class="dep__t">' + minToHHMM(d.min) + "</span>" +
+          '<span class="dep__meta">' + esc(d.name) + "</span>" +
+          '<span class="dep__in' + (mode === "TRAM" ? " dep__in--tram" : "") +
+          (soon ? " dep__in--due" : "") + '">' + esc(depCountdown(d.min)) + "</span></div>";
+      }).join("") +
+      '<div class="dep__cap">Published timetable, computed at ' + clock +
+      ". Service is suspendable at short notice for weather and water level, so confirm at the ghat.</div></div>";
+    });
+  });
+}
+
+/* ============================ policy notes ============================
+   The API publishes the reasoning behind its own limits. Showing it is what a
+   transit app people trust does with the edge of its data. */
+function policyNote(title, body, tone) {
+  return '<div class="policy" style="--pc:var(--' + (tone || "outline") + ')">' +
+    '<svg class="policy__i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.2"/><path d="M12 11v5.5M12 7.6v.2"/></svg>' +
+    "<span><b>" + esc(title) + "</b>" + esc(body) + "</span></div>";
+}
+function loadPolicy(mode, hostId) {
+  var host = $("#" + hostId);
+  if (!host) return;
+  api("/" + mode.toLowerCase() + "/status").then(function (res) {
+    var d = res && res.ok && res.json && res.json.data ? res.json.data : null;
+    if (!d) return;
+    var parts = [];
+    if (d.farePolicy) parts.push(["Fares", d.farePolicy, mode.toLowerCase()]);
+    if (d.timetablePolicy) parts.push(["Timings", d.timetablePolicy, mode.toLowerCase()]);
+    if (d.note) parts.push(["Service", d.note, mode.toLowerCase()]);
+    host.innerHTML = parts.map(function (p) { return policyNote(p[0], p[1], p[2]); }).join("");
+  });
+}
+
+/* ============================ heritage trams ============================ */
+function loadHeritage() {
+  var host = $("#tramHeritage");
+  if (!host) return;
+  host.innerHTML = '<div class="her">' + skCards(2) + "</div>";
+  api("/tram/heritage").then(function (res) {
+    var d = res && res.ok && res.json && res.json.data ? res.json.data : null;
+    if (!d) { host.innerHTML = ""; return; }
+    var items = d.items || [];
+    if (!items.length) { host.innerHTML = ""; return; }
+    host.innerHTML = '<div class="her">' + items.map(function (s) {
+      var fare = s.fare_inr ? "\u20b9" + esc(s.fare_inr) : null;
+      return '<div class="her__card"><div class="her__n">' + esc(s.tram_name || s.service_id) + "</div>" +
+        '<div class="her__d">' + esc(String(s.operation_type || "SPECIAL").replace(/_/g, " ")) + " \u00b7 " +
+        esc(String(s.service_days || "").split(",")[0]) + "s</div>" +
+        (fare ? '<span class="her__f">' + fare + "</span>" : "") +
+        (s.notes ? '<div class="rc__note">' + esc(s.notes) + "</div>" : "") + "</div>";
+    }).join("") + "</div>";
+  });
+}
+
 function loadService(mode, listId) {
   var list = $("#" + listId);
   if (!list) return;
-  list.innerHTML = '<div class="empty"><span class="spin"></span></div>';
+  list.innerHTML = skCards(4);
+  if (mode === "FERRY") loadDepartures("FERRY", "ferryDeps");
+  if (mode === "FERRY") loadPolicy("FERRY", "ferryPolicy");
+  if (mode === "TRAM") { loadDepartures("TRAM", "tramDeps"); loadPolicy("TRAM", "tramPolicy"); loadHeritage(); }
   api("/" + mode.toLowerCase() + "/routes", { query: { limit: 200 } }).then(function (res) {
     if (!res.ok || !res.json || !res.json.data) {
       list.innerHTML = '<div class="empty">Could not load ' + esc(mode.toLowerCase()) + " routes.</div>";
@@ -1518,16 +1992,16 @@ function routeDetail(no, mode, hostSel, uid) {
   uid = uid || "";
   var host = $(hostSel || "#rDetail");
   if (!host) return;
-  host.innerHTML = '<div class="card"><span class="spin"></span></div>';
+  host.innerHTML = '<div class="card card--pad">' + skLines(4) + "</div>";
   var p = "/" + mode.toLowerCase() + "/routes/" + encodeURIComponent(no);
 
   api(p).then(function (r) {
     if (!r.ok || !r.json || !r.json.data) { host.innerHTML = ""; return errBox(host, "Route not found", r); }
     var d = r.json.data;
-    if (mode === "METRO") return paintMetroRoute(host, d, no);
+    if (mode === "METRO") return paintMetroRoute(host, d, no, uid);
     if (mode === "FERRY") return paintFerryRoute(host, d, no, uid);
     if (mode === "TRAM") return paintTramRoute(host, d, no, uid);
-    return paintBusRoute(host, d, p, no);
+    return paintBusRoute(host, d, p, no, uid);
   });
 }
 
@@ -1566,7 +2040,7 @@ function routeHead(d, mode, no) {
  * The stop list is served as crossings rather than an ordered station list,
  * because a ferry route is a set of crossings between ghats and the facts that
  * matter are which ghats it touches and how long each hop takes. Reading
- * data.stops here returned nothing and printed "No stop list returned."
+ * data.stops here returned nothing, so the box said it had no stop list.
  */
 function paintFerryRoute(host, d, no, uid) {
   uid = uid || "";
@@ -1578,13 +2052,13 @@ function paintFerryRoute(host, d, no, uid) {
 
   var infoCard = '<div class="card card--pad"><div class="sect" style="margin-top:0">Service</div>' +
     '<div class="farewrap">' + fareChip(d, "FERRY", true) + "</div>" +
-    (bits.length ? '<div class="stop__meta">' + esc(bits.join(" · ")) + "</div>" : '<div class="empty">No service details supplied.</div>') + "</div>";
-  var legsCard = '<div class="card card--pad"><div class="sect" style="margin-top:0">Crossings</div><div id="legsBox' + uid + '"><span class="spin"></span></div></div>';
+    (bits.length ? '<div class="stop__meta">' + esc(bits.join(" · ")) + "</div>" : '<div class="empty"><b>No service details supplied</b>The upstream record carried no operator, frequency or confidence for this service.</div>') + "</div>";
+  var legsCard = '<div class="card card--pad"><div class="sect" style="margin-top:0">Crossings</div><div id="legsBox' + uid + '">' + skLines(3) + "</div></div>";
   host.innerHTML = routeHead(d, "FERRY", no) + infoCard + legsCard;
 
   var paint = function (legs) {
     var box = $("#legsBox" + uid); if (!box) return;
-    if (!legs.length) { box.innerHTML = '<div class="empty">No crossing list returned.</div>'; return; }
+    if (!legs.length) { box.innerHTML = '<div class="empty"><b>No crossing order published</b>The fare and frequency above still apply. The crossing-by-crossing order is not in the source data for this route.</div>'; return; }
     var rows = legs.map(function (l) {
       return '<tr><td class="mono">' + esc(l.from_ghat || l.from || "") + "</td>" +
         '<td class="mono" style="color:var(--faint)">→</td>' +
@@ -1610,14 +2084,14 @@ function paintTramRoute(host, d, no, uid) {
   if (d.service_pattern) bits.push(prettyStatus(d.service_pattern));
   var infoCard = '<div class="card card--pad"><div class="sect" style="margin-top:0">Service</div>' +
     '<div class="farewrap">' + fareChip(d, "TRAM", true) + "</div>" +
-    (bits.length ? '<div class="stop__meta">' + esc(bits.join(" · ")) + "</div>" : '<div class="empty">No service details supplied.</div>') +
+    (bits.length ? '<div class="stop__meta">' + esc(bits.join(" · ")) + "</div>" : '<div class="empty"><b>No service details supplied</b>The upstream record carried no operator, frequency or confidence for this service.</div>') +
     (d.notes ? '<div class="note" style="margin-top:10px;font-size:12.5px">' + esc(d.notes) + "</div>" : "") + "</div>";
-  var stopCard = '<div class="card card--pad"><div class="sect" style="margin-top:0">Stops</div><div id="stopsBox' + uid + '"><span class="spin"></span></div></div>';
+  var stopCard = '<div class="card card--pad"><div class="sect" style="margin-top:0">Stops</div><div id="stopsBox' + uid + '">' + skRows(4) + "</div></div>";
   host.innerHTML = routeHead(d, "TRAM", no) + infoCard + stopCard;
 
   var paint = function (stops) {
     var box = $("#stopsBox" + uid); if (!box) return;
-    if (!stops.length) { box.innerHTML = '<div class="empty">No stop list returned.</div>'; return; }
+    if (!stops.length) { box.innerHTML = '<div class="empty"><b>No stop order published</b>The route and its timings still work. Its intermediate stops are not in the source data.</div>'; return; }
     var rows = stops.map(function (s, i) {
       var nm = typeof s === "string" ? s : (s.stop_name || s.stopName || s.name || "");
       var live = typeof s === "string" ? true : s.operational !== false;
@@ -1636,7 +2110,7 @@ function paintTramRoute(host, d, no, uid) {
 }
 
 /** Bus stops carry a depot, and trips hang off the route itself. */
-function paintBusRoute(host, d, p, no) {
+function paintBusRoute(host, d, p, no, uid) {
   if (Array.isArray(d.stops)) return paintBusStops(host, d, p, no, d.stops);
   api(p + "/stops").then(function (sr) {
     paintBusStops(host, d, p, no, (sr.ok && sr.json && sr.json.data && sr.json.data.stops) || []);
@@ -1653,18 +2127,18 @@ function paintBusStops(host, d, p, no, stops) {
           return '<tr><td class="mono">' + (i + 1) + '</td><td class="mono">' + esc(nm) + "</td>" +
             '<td class="mono" style="color:var(--faint)">' + esc(dp) + "</td></tr>";
         }).join("") + "</tbody></table></div>"
-      : '<div class="empty">No stop list returned.</div>') + "</div>";
+      : '<div class="empty"><b>No stop order published</b>The route and its timings still work. Its intermediate stops are not in the source data.</div>') + "</div>";
 
-  var ttCard = '<div class="card card--pad"><div class="sect" style="margin-top:0">Timetable</div><div id="ttBox">' +
-    (d.hasTimetable ? '<span class="spin"></span>' : '<div class="empty">This route has no scheduled trips in the source data.</div>') + "</div></div>";
+  var ttCard = '<div class="card card--pad"><div class="sect" style="margin-top:0">Timetable</div><div id="ttBox' + uid + '">' +
+    (d.hasTimetable ? skLines(4) : '<div class="empty">This route has no scheduled trips in the source data.</div>') + "</div></div>";
   host.innerHTML = routeHead(d, "BUS", no) + stopCard + ttCard;
 
   if (!d.hasTimetable) return;
   api(p + "/timetable", { query: { limit: 100 } }).then(function (tr) {
-    var box = $("#ttBox"); if (!box) return;
-    if (!tr.ok || !tr.json || !tr.json.data) { box.innerHTML = '<div class="empty">Could not load the timetable.</div>'; return; }
+    var box = $("#ttBox" + uid); if (!box) return;
+    if (!tr.ok || !tr.json || !tr.json.data) { box.innerHTML = '<div class="empty"><b>Timetable unavailable</b>The route loaded, but its scheduled trips could not be fetched. Frequencies above still apply.</div>'; return; }
     var td = tr.json.data, trips = td.items || [];
-    if (!trips.length) { box.innerHTML = '<div class="empty">No scheduled trips found.</div>'; return; }
+    if (!trips.length) { box.innerHTML = '<div class="empty"><b>No dated trips in the source</b>Nothing was returned for this route, so no departure times can be listed.</div>'; return; }
     var pg = td.page || {};
     var rows = trips.map(function (t) {
       return '<tr><td class="mono">' + esc(t.tripNo != null ? t.tripNo : "—") + "</td>" +
@@ -1686,7 +2160,7 @@ function paintBusStops(host, d, p, no, stops) {
  * Metro stations carry a printed-time flag instead of a depot, and the trips
  * hang off the line rather than the route, so both lists are built separately.
  */
-function paintMetroRoute(host, d, no) {
+function paintMetroRoute(host, d, no, uid) {
   if (Array.isArray(d.stops)) return paintMetroStations(host, d, no, d.stops);
   api("/metro/stations", { query: { line: d.routeId || no, limit: 500 } }).then(function (sr) {
     var list = sr.ok && sr.json && sr.json.data ? (sr.json.data.items || sr.json.data.stations) : null;
@@ -1706,18 +2180,18 @@ function paintMetroStations(host, d, no, stops) {
             '<td class="mono" style="color:var(--faint)">' + esc(code || "—") + "</td>" +
             '<td class="mono" style="color:var(--faint)">' + (timed ? "printed" : "map only") + "</td></tr>";
         }).join("") + "</tbody></table></div>"
-      : '<div class="empty">No station list returned.</div>') + "</div>";
+      : '<div class="empty"><b>No station order published</b>The line still routes and prices normally. The station list is not in the source data.</div>') + "</div>";
 
-  var ttCard = '<div class="card card--pad"><div class="sect" style="margin-top:0">Trips</div><div id="ttBox">' +
-    (d.hasTimetable ? '<span class="spin"></span>' : '<div class="empty">No timetable was supplied for this line, so journey times on it are static estimates.</div>') + "</div></div>";
+  var ttCard = '<div class="card card--pad"><div class="sect" style="margin-top:0">Trips</div><div id="ttBox' + uid + '">' +
+    (d.hasTimetable ? skLines(4) : '<div class="empty">No timetable was supplied for this line, so journey times on it are static estimates.</div>') + "</div></div>";
   host.innerHTML = routeHead(d, "METRO", no) + stopCard + ttCard;
 
   if (!d.hasTimetable) return;
   api("/metro/routes/" + encodeURIComponent(d.routeId || no) + "/trips", { query: { limit: 100 } }).then(function (tr) {
-    var box = $("#ttBox"); if (!box) return;
-    if (!tr.ok || !tr.json || !tr.json.data) { box.innerHTML = '<div class="empty">Could not load the timetable.</div>'; return; }
+    var box = $("#ttBox" + uid); if (!box) return;
+    if (!tr.ok || !tr.json || !tr.json.data) { box.innerHTML = '<div class="empty"><b>Timetable unavailable</b>The route loaded, but its scheduled trips could not be fetched. Frequencies above still apply.</div>'; return; }
     var td = tr.json.data, trips = td.items || [];
-    if (!trips.length) { box.innerHTML = '<div class="empty">No trips found.</div>'; return; }
+    if (!trips.length) { box.innerHTML = '<div class="empty"><b>No dated trips in the source</b>Nothing was returned for this line, so no departure times can be listed.</div>'; return; }
     var pg = td.page || {};
     var rows = trips.map(function (t) {
       return '<tr><td class="mono">' + esc(t.trainNo || t.tripId || "—") + "</td>" +
@@ -1741,7 +2215,7 @@ function loadStops() {
   var q = $("#sQ").value.trim(), mode = $("#sMode").value;
   if (!q) return;
   var list = $("#sList");
-  list.innerHTML = '<div class="empty"><span class="spin"></span></div>';
+  list.innerHTML = skRows(5);
   $("#sCount").textContent = "Searching…";
   api("/search", { query: { q: q, mode: mode, limit: 50 } }).then(function (res) {
     if (!res.ok || !res.json || !res.json.data) { $("#sCount").textContent = ""; list.innerHTML = '<div class="empty">Search failed.</div>'; return; }

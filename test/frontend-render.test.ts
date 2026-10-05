@@ -61,7 +61,16 @@ function extract(name: string): string {
     }
     if (c === "/" && next === "/") { i += 1; state = "line"; continue; }
     if (c === "/" && next === "*") { i += 1; state = "block"; continue; }
-    if (c === "/" && /(?:^|[=(,:[!&|?{};+\-*%~^<>])/.test(last)) { state = "re"; inClass = false; continue; }
+    // A regex literal may only follow an operator, an opening bracket, a comma,
+    // a colon or the very start of the slice. Testing `^` as an alternative was
+    // the bug here: it matches the empty string at index 0, so the guard was
+    // always true and every "/" began a phantom regex. That silently corrupted
+    // any function containing a division, such as `Math.round(delta / 60)`.
+    if (c === "/" && (last === "" || /[=(,:[!&|?{};+\-*%~^<>]/.test(last))) {
+      state = "re";
+      inClass = false;
+      continue;
+    }
     if (c === "'") { state = "sq"; continue; }
     if (c === '"') { state = "dq"; continue; }
     if (c === "`") { state = "tpl"; continue; }
@@ -375,5 +384,153 @@ describe("ferry and tram panels", () => {
     // would be duplicated and the painter would read the wrong one.
     expect(html).toContain('id="legsBox\' + uid + \'"');
     expect(html).toContain('id="stopsBox\' + uid + \'"');
+  });
+});
+
+describe("app shell", () => {
+  it("gives a phone a thumb-reachable dock", () => {
+    // The tab strip needs a sideways swipe to reach its last item and puts every
+    // target at the top of the screen. On mobile it leaves the layout and the
+    // accessibility tree, so a dock has to take over.
+    expect(html).toContain('class="dock" id="dock"');
+    expect(html).toContain(".tabs{display:none}");
+    expect(html).toContain(".dock{display:flex}");
+    expect(html).toContain("padding-bottom:calc(64px + env(safe-area-inset-bottom,0px))");
+  });
+
+  it("keeps the dock to five targets and spills the rest into the sheet", () => {
+    const dock = html.slice(html.indexOf('id="dock"'), html.indexOf("</nav>", html.indexOf('id="dock"')));
+    expect((dock.match(/class="dock__item"/g) || []).length).toBe(5);
+    expect((dock.match(/data-go="/g) || []).length).toBe(4);
+    for (const go of ["plan", "routes", "ferry", "tram"]) expect(dock).toContain(`data-go="${go}"`);
+    // The other four panels are deliberately not dock targets.
+    for (const go of ["stops", "network", "community", "api"]) expect(dock).not.toContain(`data-go="${go}"`);
+    for (const go of ["stops", "network", "community", "api"]) expect(html).toContain(`data-go="${go}"`);
+  });
+
+  it("mirrors whichever panel is open onto the dock", () => {
+    // Two sets of controls for one set of panels only stay in step if a single
+    // function drives both.
+    expect(html).toContain("function selectTab(name)");
+    expect(html).toContain(".dock__item[data-go]");
+    expect(html).toContain('b.setAttribute("aria-current"');
+    expect(html).toContain('MORE.indexOf(name) > -1 ? "on" : "off"');
+  });
+
+  it("shows a shape-matched placeholder instead of a spinner while loading", () => {
+    // A centred spinner in an empty box reads as an error. A grey placeholder in
+    // the shape of the arriving rows reads as loading.
+    expect(html).toContain("function skRows(");
+    expect(html).toContain("function skCards(");
+    expect(html).toContain("function skLines(");
+    const body = html.slice(html.indexOf("<body"));
+    // Only the two inside-button spinners survive, which is the correct use.
+    expect((body.match(/class="spin"/g) || []).length).toBe(2);
+  });
+});
+
+describe("departures", () => {
+  const { projectDepartures, depCountdown, hhmmToMin, minToHHMM } = load(
+    "nowMin",
+    "runsToday",
+    "hhmmToMin",
+    "minToHHMM",
+    "projectDepartures",
+    "depCountdown"
+  ) as {
+    projectDepartures: (s: Record<string, unknown>[], limit?: number, clock?: number) => { min: number }[];
+    depCountdown: (min: number, clock?: number) => string;
+    hhmmToMin: (v: string | null) => number | null;
+    minToHHMM: (m: number) => string;
+  };
+
+  // F001 as published: 08:00 to 20:00, every 10 minutes, daily.
+  const daily = [
+    { service_days: "DAILY", first_departure: "08:00:00", last_departure: "20:00:00", frequency_minutes: 10 },
+  ];
+  // TRAM5 as published: irregular, so nothing may be projected from it.
+  const irregular = [
+    { service_days: "DAILY", service_pattern: "IRREGULAR", first_departure: null, last_departure: null, frequency_minutes: null },
+  ];
+  const NINE_SEVEN = 9 * 60 + 7;
+
+  it("projects from the headway when a timetable is published", () => {
+    // Clock is passed in, so the result does not depend on when the suite runs.
+    expect(projectDepartures(daily, 3, NINE_SEVEN).map((d) => minToHHMM(d.min)))
+      .toEqual(["09:10", "09:20", "09:30"]);
+  });
+
+  it("projects nothing from a service with no fixed timetable", () => {
+    // The tram record is honest about being irregular. Inventing a headway here
+    // would be the most damaging thing this app could do.
+    expect(projectDepartures(irregular, 6)).toEqual([]);
+  });
+
+  it("skips a service that does not run today", () => {
+    const weekend = [{ service_days: "SATURDAY,SUNDAY,HOLIDAY", first_departure: "10:00", last_departure: "18:00", frequency_minutes: 30 }];
+    const today = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"][new Date().getDay()];
+    const isWeekend = today === "SATURDAY" || today === "SUNDAY";
+    expect(projectDepartures(weekend, 6).length > 0).toBe(isWeekend);
+  });
+
+  it("never repeats a minute within one route", () => {
+    const out = projectDepartures([...daily, ...daily], 20, NINE_SEVEN);
+    expect(out.length).toBe(new Set(out.map((d) => d.min)).size);
+  });
+
+  it("labels a rolled-over departure as tomorrow, and today as today", () => {
+    // A 00:10 clock still faces today's 08:00. Calling that "tomorrow" is the
+    // kind of small lie that makes a departures board untrustworthy.
+    expect(depCountdown(480, 10)).toBe("in 8 hr");
+    expect(depCountdown(1920, 20 * 60 + 1)).toBe("tomorrow 08:00");
+    expect(depCountdown(9 * 60 + 10, NINE_SEVEN)).toBe("in 3 min");
+  });
+
+  it("rolls past the last departure instead of showing an empty board", () => {
+    // At 20:01 the 08:00-20:00 service is finished. Showing tomorrow's opening
+    // times is useful; showing nothing reads as "no service today".
+    const out = projectDepartures(daily, 3, 20 * 60 + 1);
+    expect(out.map((d) => minToHHMM(d.min))).toEqual(["08:00", "08:10", "08:20"]);
+    expect(out).toHaveLength(3);
+    expect(out[0]!.min).toBeGreaterThan(1440);
+  });
+
+  it("parses times defensively", () => {
+    expect(hhmmToMin("08:00:00")).toBe(480);
+    expect(hhmmToMin(null)).toBeNull();
+    expect(hhmmToMin("")).toBeNull();
+    expect(minToHHMM(0)).toBe("00:00");
+    expect(minToHHMM(1440)).toBe("00:00");
+  });
+
+  it("states that the board is not a live feed", () => {
+    // Projected times are only trustworthy if the reader knows what they are.
+    expect(html).toContain("not a live vehicle feed");
+    expect(html).toContain("computed at");
+  });
+});
+
+describe("heritage and policy notes", () => {
+  it("shows weekend heritage rides apart from routable services", () => {
+    // The API marks these informational only. Filing them with the daily routes
+    // would suggest they can be planned on.
+    expect(html).toContain("loadHeritage()");
+    expect(html).toContain('id="tramHeritage"');
+    expect(html).toContain("never used for journey planning");
+  });
+
+  it("surfaces the API's own fare and timetable policy", () => {
+    // The API publishes why an unverified fare is null rather than 0. Passing
+    // that on is what stops a blank fare reading as a bug.
+    expect(html).toContain("function loadPolicy(");
+    expect(html).toContain("d.farePolicy");
+    expect(html).toContain("d.timetablePolicy");
+  });
+
+  it("explains missing data instead of naming the missing field", () => {
+    // The phrase survives only in a doc comment that described the old bug.
+    expect(html).not.toContain("No crossing list returned.");
+    expect(html).not.toContain("No station list returned.");
+    expect(html).toContain("No stop order published");
   });
 });
