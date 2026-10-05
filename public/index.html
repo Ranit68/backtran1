@@ -829,10 +829,16 @@ function kv(k, v) { return '<div class="kv"><span>' + esc(k) + "</span><b>" + es
  * Bus routes are numbered while Metro lines are named, and the two listings
  * sort on different fields, so the sort control is rebuilt on mode change
  * rather than offering a value the API would reject.
+ *
+ * Ferry and Tram are listed without one. Their endpoints take an ordering
+ * parameter but ignore it, so a dropdown there would be a control that looks
+ * functional and does nothing.
  */
 var ROUTE_SORTS = {
   BUS: [["route_no", "Route no."], ["stop_count", "Most stops"], ["avg_trip_minutes", "Longest trip"]],
-  METRO: [["line", "Line name"], ["stop_count", "Most stations"], ["trip_count", "Most trips"]]
+  METRO: [["line", "Line name"], ["stop_count", "Most stations"], ["trip_count", "Most trips"]],
+  FERRY: [],
+  TRAM: []
 };
 $("#rGo").addEventListener("click", loadRoutes);
 $("#rQ").addEventListener("keydown", function (e) { if (e.key === "Enter") loadRoutes(); });
@@ -844,6 +850,9 @@ function syncRouteSort() {
   sel.innerHTML = opts.map(function (o) {
     return '<option value="' + esc(o[0]) + '">' + esc(o[1]) + "</option>";
   }).join("");
+  // Hidden rather than left as an empty dropdown: an empty select looks like a
+  // control that failed to load instead of one that does not apply.
+  sel.parentNode.hidden = !opts.length;
 }
 syncRouteSort();
 
@@ -855,7 +864,11 @@ function loadRoutes() {
   // The interesting sorts are all "most X", so those read best descending.
   var sort = $("#rSort").value;
   var desc = sort === "stop_count" || sort === "trip_count" || sort === "avg_trip_minutes";
-  api("/" + mode.toLowerCase() + "/routes", { query: { q: q, sort: sort, order: desc ? "desc" : "asc", limit: 200 } }).then(function (res) {
+  var query = { q: q, order: desc ? "desc" : "asc", limit: 200 };
+  // Sent only when one is chosen. With the control hidden for Ferry and Tram
+  // there is no value, and an empty string is still a parameter.
+  if (sort) query.sort = sort;
+  api("/" + mode.toLowerCase() + "/routes", { query: query }).then(function (res) {
     if (!res.ok || !res.json || !res.json.data) {
       $("#rCount").textContent = ""; list.innerHTML = '<div class="empty">Could not load routes.</div>';
       return;
@@ -866,24 +879,65 @@ function loadRoutes() {
     $("#rCount").textContent = "Showing " + items.length + " of " + total + (q ? ' matching "' + q + '"' : "") + " · " + mode.toLowerCase();
     if (!items.length) { list.innerHTML = '<div class="empty"><b>No route matched</b>Try a different number, or clear the filter.</div>'; return; }
     list.innerHTML = items.map(function (r) {
-      var c = modeColor(r.mode || mode);
-      var bits = [];
-      if (r.stopCount != null) bits.push(r.stopCount + (mode === "METRO" ? " stations" : " stops"));
-      if (r.averageTripMinutes != null) bits.push(r.averageTripMinutes + " min end to end");
-      if (mode === "METRO" && r.stationsWithTimetable != null) bits.push(r.stationsWithTimetable + " with printed times");
-      if (r.depot) bits.push(r.depot);
-      if (r.hasTimetable) bits.push("timetable");
-      var sub = mode === "METRO" && r.name ? r.name + " · " : "";
-      return '<button class="rowitem" style="--m:' + c + '" data-no="' + esc(r.routeNo) + '">' +
-        '<span class="rt--lg">' + esc(r.routeNo) + "</span>" +
-        '<span style="flex:1;min-width:0"><span class="rowitem__t">' + esc(r.firstStop || "") + (r.lastStop ? " → " + esc(r.lastStop) : "") + "</span>" +
-        '<span class="rowitem__s">' + esc(sub + (r.operator || "")) + (bits.length ? " · " + esc(bits.join(" · ")) : "") + "</span></span>" +
-        '<span class="pill">Open</span></button>';
+      if (mode === "FERRY" || mode === "TRAM") return ferryTramRow(r, mode);
+      return busMetroRow(r, mode);
     }).join("");
     Array.prototype.forEach.call(list.querySelectorAll(".rowitem"), function (b) {
       b.addEventListener("click", function () { routeDetail(b.dataset.no, mode); });
     });
   });
+}
+
+/** Bus and Metro both return camelCase with firstStop/lastStop, so they share a renderer. */
+function busMetroRow(r, mode) {
+  var c = modeColor(r.mode || mode);
+  var bits = [];
+  if (r.stopCount != null) bits.push(r.stopCount + (mode === "METRO" ? " stations" : " stops"));
+  if (r.averageTripMinutes != null) bits.push(r.averageTripMinutes + " min end to end");
+  if (mode === "METRO" && r.stationsWithTimetable != null) bits.push(r.stationsWithTimetable + " with printed times");
+  if (r.depot) bits.push(r.depot);
+  if (r.hasTimetable) bits.push("timetable");
+  var sub = mode === "METRO" && r.name ? r.name + " · " : "";
+  return '<button class="rowitem" style="--m:' + c + '" data-no="' + esc(r.routeNo) + '">' +
+    '<span class="rt--lg">' + esc(r.routeNo) + "</span>" +
+    '<span style="flex:1;min-width:0"><span class="rowitem__t">' + esc(r.firstStop || "") + (r.lastStop ? " → " + esc(r.lastStop) : "") + "</span>" +
+    '<span class="rowitem__s">' + esc(sub + (r.operator || "")) + (bits.length ? " · " + esc(bits.join(" · ")) : "") + "</span></span>" +
+    '<span class="pill">Open</span></button>';
+}
+
+/** "SERVICE_PATTERN" and "OPERATIONAL" are stored uppercase with underscores. */
+var prettyStatus = function (s) {
+  return String(s || "").replace(/_/g, " ").toLowerCase()
+    .replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+};
+
+/**
+ * Ferry and Tram rows.
+ *
+ * These two modes are listed straight from the database and keep its snake_case
+ * names, where Bus and Metro are reshaped to camelCase by their controllers.
+ * Rendering them through the Bus renderer produced a row containing only the
+ * operator, because every other field it read was undefined, and an empty
+ * data-no, so opening one asked for /ferry/routes/ with no route in it.
+ */
+function ferryTramRow(r, mode) {
+  var from = mode === "FERRY" ? r.from_ghat : r.from_terminal;
+  var to = mode === "FERRY" ? r.to_ghat : r.to_terminal;
+  var label = mode === "FERRY" ? r.route_id : (r.route_no || r.route_id);
+  var bits = [];
+  if (r.operator) bits.push(r.operator);
+  if (r.status) bits.push(prettyStatus(r.status));
+  if (r.frequency_minutes) bits.push("every " + r.frequency_minutes + " min");
+  // Only when the range says something the single fare does not, otherwise
+  // F002 reads "Rs 6 · Rs 6".
+  if (r.fare_range_inr && r.fare_range_inr !== r.fare_inr) bits.push("Rs " + r.fare_range_inr);
+  else if (r.fare_inr) bits.push("Rs " + r.fare_inr);
+  return '<button class="rowitem" style="--m:' + modeColor(mode) + '" data-no="' + esc(r.route_id) + '">' +
+    '<span class="rt--lg">' + esc(label) + "</span>" +
+    '<span style="flex:1;min-width:0"><span class="rowitem__t">' + esc(r.route_name || "") +
+      (from ? " · " + esc(from) + (to ? " → " + esc(to) : "") : "") + "</span>" +
+    '<span class="rowitem__s">' + esc(bits.join(" · ")) + "</span></span>" +
+    '<span class="pill">Open</span></button>';
 }
 
 function routeDetail(no, mode) {
@@ -895,6 +949,8 @@ function routeDetail(no, mode) {
     if (!r.ok || !r.json || !r.json.data) { host.innerHTML = ""; return errBox(host, "Route not found", r); }
     var d = r.json.data;
     if (mode === "METRO") return paintMetroRoute(host, d, no);
+    if (mode === "FERRY") return paintFerryRoute(host, d, no);
+    if (mode === "TRAM") return paintTramRoute(host, d, no);
     return paintBusRoute(host, d, p, no);
   });
 }
@@ -910,16 +966,98 @@ function routeHead(d, mode, no) {
   if (mode === "METRO" && d.stationsWithTimetable != null) {
     bits.push(d.stationsWithTimetable + " of " + d.stopCount + " with printed times");
   }
+  // Bus and Metro carry camelCase first/last stop. Ferry calls them ghats and
+  // Tram calls them terminals, and both keep the database names.
+  var from = d.firstStop || d.from_ghat || d.from_terminal;
+  var to = d.lastStop || d.to_ghat || d.to_terminal;
+  var label = d.routeNo || d.route_no || d.route_id || no;
+  var name = d.name || d.route_name || "";
 
   return '<div class="card card--pad"><div class="leg" style="margin-bottom:8px">' +
-    '<span class="mode">' + esc(d.mode || mode) + '</span><span class="rt" style="font-size:30px">' + esc(d.routeNo || no) + "</span>" +
+    '<span class="mode">' + esc(d.mode || mode) + '</span><span class="rt" style="font-size:30px">' + esc(label) + "</span>" +
     '<span class="tag ' + (d.hasTimetable ? "tag--yes" : "tag--no") + '">' + (d.hasTimetable ? "timetable" : "no timetable") + "</span></div>" +
-    (mode === "METRO" && d.name ? '<div style="font-size:15px;font-weight:500">' + esc(d.name) + "</div>" : "") +
-    (d.firstStop ? '<div style="font-size:15px;font-weight:500">' + esc(d.firstStop) + (d.lastStop ? " <span style='color:var(--faint)'>→</span> " + esc(d.lastStop) : "") + "</div>" : "") +
+    (name ? '<div style="font-size:15px;font-weight:500">' + esc(name) + "</div>" : "") +
+    (from ? '<div style="font-size:15px;font-weight:500">' + esc(from) + (to ? " <span style='color:var(--faint)'>→</span> " + esc(to) : "") + "</div>" : "") +
     (bits.length ? '<div class="stop__meta" style="margin-top:4px">' + esc(bits.join(" · ")) + "</div>" : "") +
     (mode === "METRO" && d.coverageNote ? '<div class="note" style="margin-top:10px;font-size:12.5px">' + esc(d.coverageNote) + "</div>" : "") +
     (mode === "METRO" && d.serviceDays && d.serviceDays.length ? '<div class="stop__meta" style="margin-top:6px">Timetables supplied for ' + esc(d.serviceDays.join(", ").toLowerCase()) + " service</div>" : "") +
     "</div>";
+}
+
+/**
+ * Ferry detail.
+ *
+ * The stop list is served as crossings rather than an ordered station list,
+ * because a ferry route is a set of crossings between ghats and the facts that
+ * matter are which ghats it touches and how long each hop takes. Reading
+ * data.stops here returned nothing and printed "No stop list returned."
+ */
+function paintFerryRoute(host, d, no) {
+  var bits = [];
+  if (d.first_departure) bits.push("first " + String(d.first_departure).slice(0, 5));
+  if (d.last_departure) bits.push("last " + String(d.last_departure).slice(0, 5));
+  if (d.frequency_minutes) bits.push("every " + d.frequency_minutes + " min");
+  if (d.fare_inr) bits.push("Rs " + d.fare_inr);
+  if (d.fare_range_inr) bits.push("Rs " + d.fare_range_inr);
+  if (d.status) bits.push(prettyStatus(d.status));
+  if (Array.isArray(d.service_days) && d.service_days.length) bits.push(d.service_days.join(", "));
+
+  var infoCard = '<div class="card card--pad"><div class="sect" style="margin-top:0">Service</div>' +
+    (bits.length ? '<div class="stop__meta">' + esc(bits.join(" · ")) + "</div>" : '<div class="empty">No service details supplied.</div>') + "</div>";
+  var legsCard = '<div class="card card--pad"><div class="sect" style="margin-top:0">Crossings</div><div id="legsBox"><span class="spin"></span></div></div>';
+  host.innerHTML = routeHead(d, "FERRY", no) + infoCard + legsCard;
+
+  var paint = function (legs) {
+    var box = $("#legsBox"); if (!box) return;
+    if (!legs.length) { box.innerHTML = '<div class="empty">No crossing list returned.</div>'; return; }
+    var rows = legs.map(function (l) {
+      return '<tr><td class="mono">' + esc(l.from_ghat || l.from || "") + "</td>" +
+        '<td class="mono" style="color:var(--faint)">→</td>' +
+        '<td class="mono">' + esc(l.to_ghat || l.to || "") + "</td>" +
+        '<td class="mono" style="color:var(--faint)">' + esc(l.estimated_minutes != null ? l.estimated_minutes + " min" : "—") + "</td></tr>";
+    }).join("");
+    box.innerHTML = '<div class="scroll"><table class="tt"><thead><tr><th>From</th><th></th><th>To</th><th>Time</th></tr></thead><tbody>' +
+      rows + "</tbody></table></div>";
+  };
+
+  if (Array.isArray(d.legs)) return paint(d.legs);
+  api("/ferry/routes/" + encodeURIComponent(no) + "/stops").then(function (sr) {
+    paint((sr.ok && sr.json && sr.json.data && (sr.json.data.legs || sr.json.data.stops)) || []);
+  });
+}
+
+/** Tram detail. Stops arrive as a plain ordered list on the route payload. */
+function paintTramRoute(host, d, no) {
+  var bits = [];
+  if (d.status) bits.push(prettyStatus(d.status));
+  if (d.service_type) bits.push(prettyStatus(d.service_type));
+  if (d.service_pattern) bits.push(prettyStatus(d.service_pattern));
+  if (d.fare_range_inr) bits.push("Rs " + d.fare_range_inr);
+
+  var infoCard = '<div class="card card--pad"><div class="sect" style="margin-top:0">Service</div>' +
+    (bits.length ? '<div class="stop__meta">' + esc(bits.join(" · ")) + "</div>" : '<div class="empty">No service details supplied.</div>') +
+    (d.notes ? '<div class="note" style="margin-top:10px;font-size:12.5px">' + esc(d.notes) + "</div>" : "") + "</div>";
+  var stopCard = '<div class="card card--pad"><div class="sect" style="margin-top:0">Stops</div><div id="stopsBox"><span class="spin"></span></div></div>';
+  host.innerHTML = routeHead(d, "TRAM", no) + infoCard + stopCard;
+
+  var paint = function (stops) {
+    var box = $("#stopsBox"); if (!box) return;
+    if (!stops.length) { box.innerHTML = '<div class="empty">No stop list returned.</div>'; return; }
+    var rows = stops.map(function (s, i) {
+      var nm = typeof s === "string" ? s : (s.stop_name || s.stopName || s.name || "");
+      var live = typeof s === "string" ? true : s.operational !== false;
+      return '<tr><td class="mono">' + (i + 1) + "</td>" +
+        '<td class="mono">' + esc(nm) + "</td>" +
+        '<td class="mono" style="color:var(--faint)">' + (live ? esc(prettyStatus(s.status || "operational")) : "not in service") + "</td></tr>";
+    }).join("");
+    box.innerHTML = '<div class="scroll"><table class="tt"><thead><tr><th>#</th><th>Stop</th><th>Status</th></tr></thead><tbody>' +
+      rows + "</tbody></table></div>";
+  };
+
+  if (Array.isArray(d.stops)) return paint(d.stops);
+  api("/tram/routes/" + encodeURIComponent(no) + "/stops").then(function (sr) {
+    paint((sr.ok && sr.json && sr.json.data && sr.json.data.stops) || []);
+  });
 }
 
 /** Bus stops carry a depot, and trips hang off the route itself. */
