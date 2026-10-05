@@ -318,19 +318,20 @@ describe("vercel.json routing", () => {
   const rewrites = config.rewrites ?? [];
   const entryPoint = "api/index.ts";
 
-  it("does not run the TypeScript build on Vercel", () => {
-    // tsconfig.build.json pins rootDir to src, so `npm run build` emits only
-    // dist/** and never api/index.ts. The entry point is bundled from source by
-    // Vercel's own transpiler instead, which is what has always worked: the live
-    // deployment serves /api/health out of api/index.ts. dist/ exists for
-    // `npm start` locally and nothing on Vercel reads it.
-    expect(config.buildCommand).toBeNull();
+  it("runs the build, because outputDirectory is invalid without one", () => {
+    // Setting outputDirectory alongside buildCommand: null failed the build
+    // outright, so the two have to agree. The build is only used for its
+    // side effect of completing the deployment; nothing on Vercel reads dist/.
+    expect(config.buildCommand).toBe("npm run build");
   });
 
   it("keeps the entry point out of the TypeScript build output", () => {
-    // Guards the reason the build command is disabled. If api/ is ever added to
-    // tsconfig.build.json, the compiled entry could be used instead and the null
-    // above would be a workaround for a build that is no longer broken.
+    // The build emits dist/** and never api/index.ts, which is fine: the entry
+    // point is bundled from source by Vercel, not taken from dist/. This has
+    // always been true -- the deployment that predates all of this serves
+    // /api/health out of api/index.ts. Pinned because if api/ ever moves into
+    // the build config, two copies of the entry would exist and it would be
+    // worth deciding deliberately which one runs.
     const buildConfig = JSON.parse(
       readFileSync(new URL("../tsconfig.build.json", import.meta.url), "utf8")
     ) as { include?: string[]; compilerOptions?: { rootDir?: string } };
@@ -360,10 +361,10 @@ describe("vercel.json routing", () => {
     expect(config.outputDirectory).toBe("public");
   });
 
-  it("has no standalone root rewrite, because it breaks the root", () => {
+  it("has no standalone root rewrite, because the catch-all already covers it", () => {
     // A rule with source "/" changed nothing: Vercel never got as far as
     // comparing rewrites for "/", so the 500 survived removing it. The catch-all
-    // below matches zero or more segments and covers "/" on its own.
+    // matches zero or more segments and covers "/" on its own.
     expect(rewrites.map((r) => r.source)).not.toContain("/");
     expect(rewrites.map((r) => r.source)).toContain("/:path*");
   });
