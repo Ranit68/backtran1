@@ -349,10 +349,15 @@ describe("vercel.json routing", () => {
     expect(FRONTEND_HTML.length).toBeGreaterThan(0);
   });
 
-  it("routes the root to the serverless entry point", () => {
-    // Without this the deployed site 500s on every page load, which is the
-    // failure this file exists to prevent.
-    expect(rewrites.map((r) => r.source)).toContain("/");
+  it("has no standalone root rewrite, because it breaks the root", () => {
+    // A rule with source "/" sends the site root to a 500 emitted by Vercel
+    // itself, with content-type text/plain, before the function is ever invoked.
+    // Every other path kept working, so it read as a deployed app with one bad
+    // link rather than a routing fault. The catch-all below matches zero or more
+    // segments and covers "/" on its own, so the extra rule only removes a path
+    // that worked.
+    expect(rewrites.map((r) => r.source)).not.toContain("/");
+    expect(rewrites.map((r) => r.source)).toContain("/:path*");
   });
 
   it("routes deep links to the entry point so a reload lands on the app", () => {
