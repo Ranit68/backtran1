@@ -310,11 +310,34 @@ describe("frontend", () => {
  */
 describe("vercel.json routing", () => {
   const config = JSON.parse(readFileSync(new URL("../vercel.json", import.meta.url), "utf8")) as {
+    buildCommand?: string | null;
     functions?: Record<string, { includeFiles?: string[] }>;
     rewrites?: { source: string; destination: string }[];
   };
   const rewrites = config.rewrites ?? [];
   const entryPoint = "api/index.ts";
+
+  it("does not run the TypeScript build on Vercel", () => {
+    // tsconfig.build.json pins rootDir to src, so `npm run build` emits only
+    // dist/** and never api/index.ts. Handing Vercel a build command switches it
+    // from bundling the api/ directory out of source to treating the build
+    // output as the whole deployment, after which functions.api/index.ts and
+    // every rewrite pointing at it refer to a path that does not exist and the
+    // build fails. The api/ entry imports ../src/app.js, so it needs no build
+    // step at all; dist/ is only for `npm start` locally.
+    expect(config.buildCommand).toBeNull();
+  });
+
+  it("keeps the entry point out of the TypeScript build output", () => {
+    // Guards the reason the build command is disabled. If api/ is ever added to
+    // tsconfig.build.json, the compiled entry could be used instead and the null
+    // above would be a workaround for a build that is no longer broken.
+    const buildConfig = JSON.parse(
+      readFileSync(new URL("../tsconfig.build.json", import.meta.url), "utf8")
+    ) as { include?: string[]; compilerOptions?: { rootDir?: string } };
+    expect(buildConfig.include ?? []).not.toContain("api/**/*.ts");
+    expect(buildConfig.compilerOptions?.rootDir).toBe("src");
+  });
 
   it("routes the root to the serverless entry point", () => {
     // Without this the deployed site 500s on every page load, which is the

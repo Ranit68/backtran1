@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": null,
   "functions": {
     "api/index.ts": {
       "memory": 1024,
