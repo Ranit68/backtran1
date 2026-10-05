@@ -234,6 +234,16 @@ describe("prettyStatus", () => {
   });
 });
 
+describe("bundled page", () => {
+  it("embeds the current public/index.html rather than a stale copy", async () => {
+    // src/frontend.ts serves the page out of the bundle on Vercel, so a stale
+    // generated file means the deployed site runs old markup that calls endpoints
+    // which no longer exist, while the repo and local dev both look correct.
+    const { FRONTEND_HTML } = await import("../src/frontend-html.generated.js");
+    expect(FRONTEND_HTML).toBe(readFileSync(new URL("../public/index.html", import.meta.url), "utf8"));
+  });
+});
+
 describe("wiring", () => {
   it("renders ferry and tram rows through their own renderer", () => {
     // Without this the two modes fell through to the bus renderer again. The row

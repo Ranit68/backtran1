@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { FastifyReply } from "fastify";
+import { FRONTEND_HTML } from "./frontend-html.generated.js";
 
 /**
  * Serves the single-page frontend.
@@ -12,6 +13,12 @@ import type { FastifyReply } from "fastify";
  * the host to serve the file is not enough: the deployment has to be correct in
  * two places at once, and when it is not, every page load is a 500 rather than
  * a degraded one. Serving it here means there is a single source of truth.
+ *
+ * The page is compiled into the bundle rather than read from disk. On Vercel the
+ * only way to get a runtime file into a function is an includeFiles glob in
+ * vercel.json, and that glob is what has been failing the build; embedding the
+ * page removes the second moving part, and this function is the single place
+ * that decides what a browser gets.
  */
 
 const INDEX_RELATIVE = join("public", "index.html");
@@ -42,6 +49,13 @@ let cached: string | null | undefined;
 /** The page source, or null when it cannot be found. Cached after the first call. */
 export function readFrontend(): string | null {
   if (cached !== undefined) return cached;
+  // The embedded copy is the deployment path. The disk read is kept as the
+  // fallback for local runs started without the generate step, so a missing
+  // generated file degrades to "read from public/" instead of "no page at all".
+  if (FRONTEND_HTML.length > 0) {
+    cached = FRONTEND_HTML;
+    return cached;
+  }
   for (const path of candidatePaths()) {
     try {
       cached = readFileSync(path, "utf8");

@@ -319,12 +319,10 @@ describe("vercel.json routing", () => {
 
   it("does not run the TypeScript build on Vercel", () => {
     // tsconfig.build.json pins rootDir to src, so `npm run build` emits only
-    // dist/** and never api/index.ts. Handing Vercel a build command switches it
-    // from bundling the api/ directory out of source to treating the build
-    // output as the whole deployment, after which functions.api/index.ts and
-    // every rewrite pointing at it refer to a path that does not exist and the
-    // build fails. The api/ entry imports ../src/app.js, so it needs no build
-    // step at all; dist/ is only for `npm start` locally.
+    // dist/** and never api/index.ts. The entry point is bundled from source by
+    // Vercel's own transpiler instead, which is what has always worked: the live
+    // deployment serves /api/health out of api/index.ts. dist/ exists for
+    // `npm start` locally and nothing on Vercel reads it.
     expect(config.buildCommand).toBeNull();
   });
 
@@ -337,6 +335,18 @@ describe("vercel.json routing", () => {
     ) as { include?: string[]; compilerOptions?: { rootDir?: string } };
     expect(buildConfig.include ?? []).not.toContain("api/**/*.ts");
     expect(buildConfig.compilerOptions?.rootDir).toBe("src");
+  });
+
+  it("ships the page inside the bundle rather than copying it in", async () => {
+    // `includeFiles` on the function is the only build-affecting change between
+    // 60355c4, the last commit that deployed, and 705f4bb, after which every
+    // build has failed before producing a deployment. The page is now compiled
+    // into the bundle instead, so there must be no glob left to misbehave and no
+    // runtime file for the function to fail to find.
+    const include = config.functions?.[entryPoint]?.includeFiles;
+    expect(include ?? []).toEqual([]);
+    const { FRONTEND_HTML } = await import("../src/frontend-html.generated.js");
+    expect(FRONTEND_HTML.length).toBeGreaterThan(0);
   });
 
   it("routes the root to the serverless entry point", () => {
@@ -368,10 +378,13 @@ describe("vercel.json routing", () => {
     expect(apiIndex).toBeLessThan(catchAllIndex);
   });
 
-  it("bundles the frontend into the function, since the host serves no files", () => {
-    // public/index.html is read at runtime by src/frontend.ts, so if it is not
-    // included in the bundle the entry point 500s on every page request.
-    const include = config.functions?.[entryPoint]?.includeFiles ?? [];
-    expect(include).toContain("public/**");
+  it("bundles the frontend into the function, since the host serves no files", async () => {
+    // src/frontend.ts serves the page from the embedded copy, so the bundle has
+    // to carry it. This asserts the page actually made it in, which is what a
+    // missing file looks like from the outside: every page request 500s while
+    // every API request still succeeds.
+    const { FRONTEND_HTML } = await import("../src/frontend-html.generated.js");
+    expect(FRONTEND_HTML).toContain("<!doctype html>");
+    expect(FRONTEND_HTML.length).toBeGreaterThan(1000);
   });
 });
