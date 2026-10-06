@@ -59,7 +59,15 @@ export interface CommunityFeed {
   reports: CommunityReport[];
   /** How many live posts this route has, which may exceed the returned page. */
   totalActive: number;
-  /** True when totalActive is greater than reports.length. */
+  /** Echoed back, so a caller paging through can ask for the next window. */
+  offset: number;
+  /**
+   * True when more live posts exist after this window.
+   *
+   * Computed against `offset + reports.length`, not against the page length,
+   * because a caller that has already read 100 posts and asks from offset 100
+   * has not run out of posts just because its window was full.
+   */
   hasMore: boolean;
   ttlHours: number;
   messageMaxLength: number;

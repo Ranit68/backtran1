@@ -29,6 +29,11 @@ loadDotenv();
 // on 429s that say nothing about the code under test.
 process.env.COMMUNITY_POST_RATE_LIMIT_MAX = "1000";
 
+// Set so the admin sweep below can be exercised through the real guard rather
+// than being asserted as permanently unreachable. api.contract.test.ts covers
+// the unset case, which is where "fails closed" actually lives.
+process.env.ADMIN_KEY = "community-test-key";
+
 const hasDatabase = Boolean(process.env.DATABASE_URL);
 
 let app: import("fastify").FastifyInstance;
@@ -56,6 +61,7 @@ interface FeedBody {
   scope: { mode: string; key: string; label: string };
   reports: ReportBody[];
   totalActive: number;
+  offset: number;
   hasMore: boolean;
   ttlHours: number;
   messageMaxLength: number;
@@ -386,6 +392,60 @@ describe.skipIf(!hasDatabase)("GET /api/community/:mode/:route", () => {
     expect(everything.hasMore).toBe(false);
   });
 
+  it("pages through the whole feed with offset, without repeating a post", async () => {
+    // The whole point of offset is that a caller can reach posts a single page
+    // cannot hold. A feed that silently drops everything past the first window
+    // would still pass a test that only reads page one.
+    await query("DELETE FROM community_reports");
+    const scope = await resolveRouteScope("METRO", "YELLOW");
+    for (let i = 0; i < 5; i++) await createReport(scope!, `paged report ${i}`);
+
+    const seen: string[] = [];
+    let offset = 0;
+    for (let page = 0; page < 10; page++) {
+      const { status, body } = await get<FeedBody>(
+        `/api/community/METRO/YELLOW?limit=2&offset=${offset}`,
+      );
+      expect(status).toBe(200);
+      const feed = body.data!;
+      // Echoed back so the caller does not have to recompute where it was.
+      expect(feed.offset).toBe(offset);
+      expect(feed.totalActive).toBe(5);
+      seen.push(...feed.reports.map((r) => r.message));
+      if (!feed.hasMore) break;
+      offset += feed.reports.length;
+    }
+
+    expect(seen).toHaveLength(5);
+    expect(new Set(seen).size).toBe(5);
+  });
+
+  it("stops claiming there is more once the reader is past the end", async () => {
+    // An empty window and a feed with nothing left in it must not be the same
+    // answer. Judged only against page length, an offset past the end reads as
+    // "hasMore: true" forever, which sends a client looping on a feed that will
+    // never grow.
+    await query("DELETE FROM community_reports");
+    const scope = await resolveRouteScope("METRO", "YELLOW");
+    for (let i = 0; i < 3; i++) await createReport(scope!, `tail report ${i}`);
+
+    const { status, body } = await get<FeedBody>(
+      "/api/community/METRO/YELLOW?limit=2&offset=100",
+    );
+    expect(status).toBe(200);
+    const feed = body.data!;
+    expect(feed.reports).toEqual([]);
+    expect(feed.offset).toBe(100);
+    expect(feed.totalActive).toBe(3);
+    expect(feed.hasMore).toBe(false);
+  });
+
+  it("rejects an offset that is negative or not a number", async () => {
+    expect((await get("/api/community/METRO/BLUE?offset=-1")).status).toBe(400);
+    expect((await get("/api/community/METRO/BLUE?offset=abc")).status).toBe(400);
+    expect((await get("/api/community/METRO/BLUE?offset=1.5")).status).toBe(400);
+  });
+
   it("404s an unknown route instead of returning an empty feed", async () => {
     // An empty 200 would be indistinguishable from "nothing is happening",
     // which is exactly the message a rider must never be given by mistake.
@@ -471,5 +531,47 @@ describe.skipIf(!hasDatabase)("24 hour lifetime", () => {
     // Read back from storage rather than trusting the controller's own arithmetic,
     // so this proves what was actually written to the row.
     expect(Number(hours[0]!.hours)).toBe(24);
+  });
+});
+
+describe.skipIf(!hasDatabase)("POST /api/admin/community/sweep", () => {
+  async function sweep(headers: Record<string, string> = {}) {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/admin/community/sweep",
+      headers,
+    });
+    return { status: res.statusCode, body: res.json() as Envelope<{ removed: number }> };
+  }
+
+  it("refuses a request with no key or the wrong key", async () => {
+    // The guard is the same one the graph rebuild uses, so the failure shape is
+    // already pinned by api.contract.test.ts; this only proves the new route is
+    // behind it rather than accidentally open.
+    expect((await sweep()).status).toBe(401);
+    expect((await sweep({ "x-admin-key": "wrong" })).status).toBe(401);
+  });
+
+  it("removes expired reports on demand and counts them, leaving live ones", async () => {
+    await query("DELETE FROM community_reports");
+    const scope = await resolveRouteScope("METRO", "GREEN");
+    await createReport(scope!, "keep me past the sweep");
+    await query(
+      `INSERT INTO community_reports
+         (report_id, scope_mode, scope_key, scope_label, message, created_at, expires_at)
+       VALUES ('t_sweep_endpoint', 'METRO', 'GREEN', $1, 'already gone',
+               NOW() - INTERVAL '30 hours', NOW() - INTERVAL '6 hours')`,
+      [scope!.label],
+    );
+
+    const { status, body } = await sweep({ "x-admin-key": process.env.ADMIN_KEY! });
+    expect(status).toBe(200);
+    // Greater than rather than equal: the sweep is global, so it may also
+    // reclaim rows other tests left expired.
+    expect(body.data!.removed).toBeGreaterThanOrEqual(1);
+
+    // The count alone would not catch a sweep that deleted live posts too.
+    const feed = await listReports(scope!, 50);
+    expect(feed.reports.map((r) => r.message)).toEqual(["keep me past the sweep"]);
   });
 });

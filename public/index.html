@@ -592,6 +592,10 @@ textarea:focus{outline:none; border-color:var(--metro); box-shadow:0 0 0 3px rgb
   background:var(--surface-low); border:1px solid var(--line);
 }
 .cm-note{margin-top:var(--sp-md)}
+/* Pager. `display:flex` would otherwise beat the UA rule for [hidden], so the
+   empty case needs an explicit opt-out rather than relying on the attribute. */
+.cm-pager{display:flex; align-items:center; justify-content:space-between; gap:var(--sp-sm); margin-top:var(--sp-sm)}
+.cm-pager[hidden]{display:none}
 
 /* ---------------- spinner / states ---------------- */
 .spin{
@@ -1104,6 +1108,10 @@ dialog#cfg .btn--ghost{background:var(--surface-lowest)}
     </div>
 
     <div class="list" id="cmFeed"></div>
+    <div class="cm-pager" id="cmPager" hidden>
+      <button class="btn btn--ghost" id="cmNewer" type="button" hidden>Newer reports</button>
+      <button class="btn btn--ghost" id="cmOlder" type="button" hidden>Older reports</button>
+    </div>
     <p class="cm-note" id="cmNote" hidden></p>
   </section>
 
@@ -1328,10 +1336,28 @@ document.addEventListener("keydown", function (e) {
    the rule, the composer follows it; if the client hardcoded 500 it would happily
    let someone write a post the server then rejects. */
 var cmMax = 500, cmTtl = 24, cmScope = null;
+/* Which window of the feed is on screen. The API pages the feed with `limit`
+   and `offset`, so this is that contract from the caller's side: cmOffset is
+   where the current window starts, cmShown how long it turned out to be, and
+   cmHistory the offsets already visited. Offsets are remembered rather than
+   recomputed so "Newer" can retrace the way back without assuming every page
+   was the same length, which stops being true the moment a post expires. */
+var cmPage = 20, cmOffset = 0, cmShown = 0, cmHasMore = false, cmTotal = 0, cmHistory = [];
 /* Report ids this browser posted in this session. The server cannot know who wrote
    a post, because there are no accounts, so this is the only honest way to mark
    one as "yours": remember what we just sent. */
 var cmMine = {};
+
+/* Switching route or mode abandons the old window rather than carrying it over:
+   an offset into one route's feed means nothing against another route's. */
+function cmReset() {
+  cmOffset = 0;
+  cmShown = 0;
+  cmHasMore = false;
+  cmTotal = 0;
+  cmHistory = [];
+  $("#cmPager").hidden = true;
+}
 
 function cmAgo(iso) {
   var then = Date.parse(iso);
@@ -1364,13 +1390,22 @@ function cmEmpty(text) {
 function loadCommunity() {
   var mode = $("#cmMode").value;
   var route = $("#cmRoute").value.trim();
-  if (!route) { cmScope = null; $("#cmWrite").hidden = true; $("#cmNote").hidden = true; cmEmpty("Pick a route to see its reports."); return; }
+  if (!route) {
+    cmScope = null;
+    cmReset();
+    $("#cmWrite").hidden = true;
+    $("#cmNote").hidden = true;
+    cmEmpty("Pick a route to see its reports.");
+    return;
+  }
 
   cmEmpty("Loading reports for " + route + "...");
-  return api("/community/" + encodeURIComponent(mode) + "/" + encodeURIComponent(route))
+  return api("/community/" + encodeURIComponent(mode) + "/" + encodeURIComponent(route),
+    { query: { limit: cmPage, offset: cmOffset } })
     .then(function (res) {
       if (!res.ok || !res.json || !res.json.success) {
         cmScope = null;
+        cmReset();
         $("#cmWrite").hidden = true;
         $("#cmNote").hidden = true;
         /* The hint has to be cleared too. Leaving the previous route's "N of M
@@ -1399,6 +1434,21 @@ function loadCommunity() {
       cmCount();
 
       var list = feed.reports || [];
+      cmTotal = feed.totalActive || 0;
+      cmHasMore = !!feed.hasMore;
+      cmShown = list.length;
+
+      /* Posts expire around the clock, so a window can empty out from under the
+         reader while they are looking at it. Dropping them on a blank page that
+         sits one window past the end is a dead end they cannot walk back from
+         without retyping the route, so the offset falls back to the newest
+         window. It cannot loop: the reset zeroes the offset, and the offset is
+         the only thing that triggers this. */
+      if (!list.length && feed.offset > 0) {
+        cmReset();
+        return loadCommunity();
+      }
+
       if (!list.length) {
         cmEmpty("No reports for " + (cmScope ? cmScope.label : route) + " yet. Be the first to post.");
       } else {
@@ -1415,10 +1465,16 @@ function loadCommunity() {
       }
 
       $("#cmHint").textContent = cmScope
-        ? cmScope.label + " \u00b7 " + list.length + " of " + feed.totalActive + " report" +
-          (feed.totalActive === 1 ? "" : "s") + " showing" + (feed.hasMore ? " \u2014 older reports not loaded" : "")
+        ? cmScope.label + " \u00b7 " +
+          (list.length ? (feed.offset + 1) + "\u2013" + (feed.offset + list.length) : "0") +
+          " of " + cmTotal + " report" + (cmTotal === 1 ? "" : "s")
         : "";
       $("#cmWrite").hidden = !cmScope;
+      /* Hidden outright when there is nothing to step through, so an empty pager
+         row does not sit above the note taking up space. */
+      $("#cmPager").hidden = !cmScope || (!cmHasMore && !cmHistory.length);
+      $("#cmOlder").hidden = !cmHasMore;
+      $("#cmNewer").hidden = !cmHistory.length;
       var note = $("#cmNote");
       note.textContent = "Posts are anonymous and last " + cmTtl + " hours, then they are deleted. " +
         "Anyone can read the reports for " + (cmScope ? cmScope.label : route) + ", and only that route.";
@@ -1451,14 +1507,32 @@ function postCommunity() {
     cmMine[res.json.data.reportId] = true;
     ta.value = "";
     cmCount();
+    /* A new post belongs at the top of the newest window. Reloading wherever the
+       reader happened to be paged to would hide their own report from them. */
+    cmReset();
     loadCommunity();
   }).catch(function () { btn.disabled = false; });
 }
-$("#cmGo").addEventListener("click", loadCommunity);
-$("#cmRoute").addEventListener("keydown", function (e) { if (e.key === "Enter") loadCommunity(); });
-$("#cmMode").addEventListener("change", function () { if (cmScope) cmScope = null; loadCommunity(); });
+$("#cmGo").addEventListener("click", function () { cmReset(); loadCommunity(); });
+$("#cmRoute").addEventListener("keydown", function (e) {
+  if (e.key === "Enter") { cmReset(); loadCommunity(); }
+});
+$("#cmMode").addEventListener("change", function () { if (cmScope) cmScope = null; cmReset(); loadCommunity(); });
 $("#cmPost").addEventListener("click", postCommunity);
 $("#cmText").addEventListener("input", cmCount);
+$("#cmOlder").addEventListener("click", function () {
+  /* cmShown is the length of the window actually on screen, so the next window
+     starts exactly where this one stopped rather than at a guessed page size. */
+  if (!cmScope || !cmHasMore || !cmShown) return;
+  cmHistory.push(cmOffset);
+  cmOffset += cmShown;
+  loadCommunity();
+});
+$("#cmNewer").addEventListener("click", function () {
+  if (!cmScope || !cmHistory.length) return;
+  cmOffset = cmHistory.pop();
+  loadCommunity();
+});
 /* Keeps the countdown honest without a page reload: posts vanish on their own 24
    hour clock, so a feed left open should not keep showing something that is
    already gone. Only refetches when the community tab is actually on screen. */
@@ -2419,11 +2493,17 @@ var ENDPOINTS = [
   { g: "Ferry · live", m: "GET", p: "/ferry/ghats" },
   { g: "Ferry · live", m: "GET", p: "/ferry/search" },
   { g: "Ferry · live", m: "GET", p: "/ferry/diagnostics" },
+  { g: "Community", m: "GET", p: "/community/:mode/:route", pv: "mode,route",
+    q: [["mode", "BUS | METRO | FERRY | TRAM", "METRO"], ["route", "path", "BLUE"], ["limit", "1-100", "20"], ["offset", "number", "0"]] },
+  { g: "Community", m: "POST", p: "/community/:mode/:route", pv: "mode,route",
+    q: [["mode", "BUS | METRO | FERRY | TRAM", "METRO"], ["route", "path", "BLUE"]],
+    body: '{\n  "message": "Platform screen doors out of service at Park Street."\n}' },
   { g: "Admin · key required", m: "GET", p: "/admin/status" },
   { g: "Admin · key required", m: "GET", p: "/admin/routes/aliases", q: [["mode", "BUS | METRO", ""]], admin: true },
   { g: "Admin · key required", m: "POST", p: "/admin/routes/alias", admin: true,
     body: '{\n  "mode": "BUS",\n  "sourceRouteNo": "AC-3",\n  "targetRouteNo": "AC-3B",\n  "note": "same corridor"\n}' },
-  { g: "Admin · key required", m: "POST", p: "/admin/graph/refresh", admin: true, q: [["force", "true | false", "false"]] }
+  { g: "Admin · key required", m: "POST", p: "/admin/graph/refresh", admin: true, q: [["force", "true | false", "false"]] },
+  { g: "Admin · key required", m: "POST", p: "/admin/community/sweep", admin: true }
 ];
 
 function buildExplorer() {
@@ -2467,9 +2547,14 @@ function buildExplorer() {
     var def = ENDPOINTS[+eg.id.slice(2)];
     if (!def) return;
     var path = def.p, query = {};
+    // A route can have more than one path segment to fill in, so pv is a list
+    // of names separated by commas. Anything not named in it is sent as a query
+    // string instead, which is how a param that is genuinely a query param stays
+    // one when the same endpoint also carries path params.
+    var pvs = (def.pv || "").split(",");
     Array.prototype.forEach.call(eg.querySelectorAll("[data-p]"), function (inp) {
       var k = inp.dataset.p;
-      if (k === def.pv) path = path.replace(":" + k, encodeURIComponent(inp.value));
+      if (pvs.indexOf(k) > -1) path = path.replace(":" + k, encodeURIComponent(inp.value));
       else query[k] = inp.value;
     });
     var body = null, ta = eg.querySelector("[data-body]");

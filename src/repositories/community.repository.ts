@@ -220,14 +220,16 @@ export async function createReport(
 export async function listReports(
   scope: RouteScope,
   limit: number,
+  offset = 0,
 ): Promise<CommunityFeed> {
   requireDatabase();
-  return withDatabaseErrors(() => listReportsUnguarded(scope, limit));
+  return withDatabaseErrors(() => listReportsUnguarded(scope, limit, offset));
 }
 
 async function listReportsUnguarded(
   scope: RouteScope,
   limit: number,
+  offset: number,
 ): Promise<CommunityFeed> {
   // Space reclamation only. A read is already correct without it, so a failure
   // here must never fail the request the rider actually made. Not awaited, and
@@ -242,8 +244,8 @@ async function listReportsUnguarded(
         AND scope_key = $2
         AND expires_at > NOW()
       ORDER BY created_at DESC, report_id DESC
-      LIMIT $3`,
-    [scope.mode, scope.key, limit],
+      LIMIT $3 OFFSET $4`,
+    [scope.mode, scope.key, limit, offset],
   );
 
   const total = await queryOne<Row>(
@@ -254,11 +256,17 @@ async function listReportsUnguarded(
   );
 
   const reports = (rows as Row[]).map(toReport);
+  const totalActive = Number(total?.total ?? 0);
   return {
     scope,
     reports,
-    totalActive: Number(total?.total ?? 0),
-    hasMore: Number(total?.total ?? 0) > reports.length,
+    totalActive,
+    offset,
+    // Compared against how far the caller has read, not against the page
+    // length. Paging past the end of the feed must report that there is
+    // nothing further rather than promising a window that will come back
+    // empty forever.
+    hasMore: offset + reports.length < totalActive,
     ttlHours: REPORT_TTL_HOURS,
     messageMaxLength: REPORT_MESSAGE_MAX_LENGTH,
     posting: { anonymous: true, requiresAccount: false },

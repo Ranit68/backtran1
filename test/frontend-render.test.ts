@@ -429,6 +429,63 @@ describe("app shell", () => {
   });
 });
 
+describe("community feed paging", () => {
+  it("asks the API for the window it is showing", () => {
+    // hasMore is only worth printing if the client can act on it, so the feed
+    // request has to carry the offset the client was told about.
+    expect(html).toContain("{ query: { limit: cmPage, offset: cmOffset } }");
+  });
+
+  it("reaches older reports instead of promising them and stopping", () => {
+    // The old copy said "older reports not loaded" with no way to load them,
+    // which is a dead end rather than an honest limit.
+    expect(html).toContain('id="cmOlder"');
+    expect(html).toContain("cmOffset += cmShown;");
+    expect(html).not.toContain("older reports not loaded");
+  });
+
+  it("steps back to a window it remembers rather than recomputing one", () => {
+    // A page is only as long as the posts still alive inside it, so a fixed
+    // "offset minus page size" walks back to the wrong place as soon as
+    // something expires. The offset is pushed before advancing instead.
+    expect(html).toContain("cmHistory.push(cmOffset);");
+    expect(html).toContain("cmOffset = cmHistory.pop();");
+    expect(html).toContain('id="cmNewer"');
+  });
+
+  it("returns to the newest window when the one on screen has expired", () => {
+    // Posts expire around the clock, so a window can empty out while it is on
+    // screen. Landing the rider one page past the end with no way back would
+    // need a route retype to escape; the offset guard keeps it to one retry.
+    expect(html).toContain("if (!list.length && feed.offset > 0) {");
+    expect(html).toContain("return loadCommunity();");
+  });
+
+  it("leaves the pager hidden when there is nothing to step through", () => {
+    expect(html).toContain('id="cmPager" hidden');
+    expect(html).toContain('$("#cmPager").hidden = !cmScope || (!cmHasMore && !cmHistory.length);');
+    // display:flex would otherwise beat the UA rule for [hidden] and leave an
+    // empty row sitting above the note.
+    expect(html).toContain(".cm-pager[hidden]{display:none}");
+  });
+
+  it("brings a rider back to the top after they post", () => {
+    // Their own report is in the newest window, so posting from page three
+    // would reload a page that does not contain it.
+    const post = extract("postCommunity");
+    expect(post).toContain("cmReset();");
+    expect(post).toContain("loadCommunity();");
+  });
+
+  it("offers the community feed in the API explorer", () => {
+    // Community was the one feature with no entry there, so its endpoints could
+    // not be exercised from the browser like every other group. Two path
+    // segments is also what pv's comma list exists for.
+    expect(html).toContain('p: "/community/:mode/:route", pv: "mode,route"');
+    expect(html).toContain("var pvs = (def.pv || \"\").split(\",\");");
+  });
+});
+
 describe("departures", () => {
   const { projectDepartures, depCountdown, hhmmToMin, minToHHMM } = load(
     "nowMin",

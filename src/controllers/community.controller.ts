@@ -10,13 +10,16 @@ import {
   listReports,
   normaliseMessage,
   resolveRouteScope,
+  sweepExpired,
 } from "../repositories/community.repository.js";
 import { handle, parseOrThrow } from "./base.controller.js";
 
 /**
  * Route-scoped community reports.
  *
- * GET  /api/community/:mode/:route  -- the feed for one route
+ * GET  /api/community/:mode/:route  -- the feed for one route, newest first:
+ *        `limit` and `offset` page it, and the feed says whether more remains
+ *        past the window that was returned.
  * POST /api/community/:mode/:route  -- leave a report about that route
  *
  * Posts are anonymous text that live for 24 hours. There is no account system
@@ -44,6 +47,11 @@ const routeParamSchema = z.object({
 
 const feedQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
+  // Capped only from below. A feed is one route's posts, so an absurd offset
+  // costs one index scan that returns nothing, exactly as a large page would;
+  // rejecting it instead would tell a caller paging a long-lived route that its
+  // position is invalid, which it is not.
+  offset: z.coerce.number().int().min(0).default(0),
 });
 
 const postBodySchema = z.object({
@@ -78,7 +86,7 @@ export async function getCommunityFeed(
     const params = parseOrThrow(routeParamSchema, request.params);
     const query = parseOrThrow(feedQuerySchema, request.query);
     const scope = await requireScope(params.mode, params.route);
-    return listReports(scope, query.limit);
+    return listReports(scope, query.limit, query.offset);
   });
 }
 
@@ -106,4 +114,23 @@ export async function postCommunityReport(
     // can render the post it just made without refetching the feed.
     return createReport(scope, message);
   }, 201);
+}
+
+/**
+ * Admin-triggered expiry sweep: POST /api/admin/community/sweep.
+ *
+ * Reads already sweep opportunistically, so this is not what makes a post
+ * disappear -- that is the `expires_at > NOW()` clause on every read, and it
+ * does not depend on any of this running. What the endpoint is for is reclaiming
+ * the space on demand, when someone is looking at the table rather than waiting
+ * for whichever read happens to trigger it.
+ *
+ * Reports how many rows went, because a sweep that silently removes nothing is
+ * indistinguishable from one that was never asked for.
+ */
+export async function sweepCommunityReports(
+  _request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<FastifyReply> {
+  return handle(reply, async () => ({ removed: await sweepExpired() }));
 }

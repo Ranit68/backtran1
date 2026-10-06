@@ -1,0 +1,34 @@
+-- 009: Drop community_reports.rate_limited_at
+--
+-- WHY IT WAS ADDED
+-- -----------------
+-- 008 gave the table a `rate_limited_at` column "so the write path can record
+-- and observe throttling without a second table", and stamped it as kept for
+-- observability of that write path.
+--
+-- WHY IT NEVER WORKED
+-- -------------------
+-- It cannot work as designed, and this is worth writing down so nobody
+-- reintroduces it. Throttling is decided by a per-route rate limiter that runs
+-- as a preHandler, which is before any INSERT: a rejected post produces no row,
+-- so there is nothing in this table for the timestamp to be written to. The only
+-- ways to make the column non-null would be either to insert a row for a post
+-- that was never accepted, or to change where throttling is recorded from "per
+-- route" to "per report", neither of which is what an operator asking "is this
+-- route being spammed?" wants.
+--
+-- Observation of throttling is also the wrong thing to read from here even if it
+-- were written: the limiter is in-memory and resets with the process, so any
+-- value stored would describe one process's view of one window while claiming
+-- to be a durable record. A partial record is worse than none, because it looks
+-- like data.
+--
+-- WHAT IS STILL TRUE
+-- ------------------
+-- Throttling itself is unaffected. The write limiter keeps its route-scoped
+-- configuration, still answers 429 RATE_LIMITED with a message a client can act
+-- on, and expiry still depends only on expires_at. Nothing reads this column:
+-- it was carried forward from the migration that created the table and has
+-- never been selected or inserted into by any code path.
+
+ALTER TABLE community_reports DROP COLUMN IF EXISTS rate_limited_at;

@@ -5,6 +5,7 @@ import {
   listRouteAliases,
   refreshTransportGraph,
 } from "../controllers/admin.controller.js";
+import { sweepCommunityReports } from "../controllers/community.controller.js";
 import { assertAdminKey, readAdminKey } from "../controllers/base.controller.js";
 
 /**
@@ -43,4 +44,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: adminGuard },
     refreshTransportGraph,
   );
+  // Reclaims expired report rows on demand. It changes no behaviour a rider can
+  // see: expiry is enforced on the read path, so this only decides when the disk
+  // space comes back.
+  app.post("/admin/community/sweep", { preHandler: adminGuard }, sweepCommunityReports);
 }

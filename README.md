@@ -22,8 +22,9 @@ Built from `Kolkata_Multimodal_Transport_Backend_Specification.docx`. Bus data i
   - [Tram (withdrawn)](#tram-withdrawn)
   - [Journey planning](#journey-planning)
   - [Graph introspection](#graph-introspection)
-  - [Ferry (not configured)](#ferry-not-configured)
-  - [Admin](#admin)
+- [Ferry (not configured)](#ferry-not-configured)
+- [Community](#community)
+- [Admin](#admin)
 - [Error codes](#error-codes)
 - [How the planner works](#how-the-planner-works)
 - [Data quality decisions](#data-quality-decisions)
@@ -41,6 +42,7 @@ Built from `Kolkata_Multimodal_Transport_Backend_Specification.docx`. Bus data i
 | Metro | Working | Four supplied read-only tables: `metro_routes`, `metro_stations`, `metro_trips`, `metro_timetable_checkpoints` (6 lines, 80 line/station entries, 1,720 trips, 5,849 checkpoints) | Supplied for 5 of 6 lines. Per-hop times are measured between consecutive printed times, and per-run times are interpolated or read directly. See [Metro data limits](#metro-data-limits) |
 | Tram | Withdrawn (`410 TRAM_SERVICE_WITHDRAWN`) | Legacy tables left untouched | — |
 | Ferry | `501 FERRY_NOT_CONFIGURED` | None supplied; spec forbids inventing it | — |
+| Community | Working | None needed — riders write the reports; see [Community](#community) | — |
 
 The application **boots without a database**. Data endpoints then return `503 DATABASE_NOT_CONFIGURED` rather than crashing, which lets the API be built, started, and smoke-tested before a Supabase project exists.
 
@@ -659,6 +661,67 @@ Every detected transfer with the reason it was detected and the resulting walk t
 
 No ferry CSV was supplied, and the specification forbids inventing the schema.
 
+### Community
+
+Anonymous reports about one route, written by whoever is on it. Posts live for 24 hours and are then gone. There is no account system in this service, so nothing here pretends to know who wrote a post.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/community/:mode/:route` | The feed for one route, newest first. |
+| `POST /api/community/:mode/:route` | Leave a report on that route. Returns `201`. |
+| `POST /api/admin/community/sweep` | Delete posts already past their expiry. Returns `{"removed": n}`. Admin key required. |
+
+#### `GET /api/community/:mode/:route`
+
+`:mode` is `BUS`, `METRO`, `FERRY` or `TRAM`. `:route` is resolved against the real route tables first — the identifier, the route name, or an entry in `route_aliases` all match, case-insensitively. Anything else is `404 ROUTE_NOT_FOUND`, because a post about a route nobody can fetch would be invisible to everyone forever.
+
+| Query | Type | Default |
+| --- | --- | --- |
+| `limit` | int 1–100 | `50` |
+| `offset` | int ≥ 0 | `0` |
+
+```json
+{
+  "success": true,
+  "data": {
+    "scope": { "mode": "METRO", "key": "BLUE", "label": "North-South / Blue Line" },
+    "reports": [
+      {
+        "reportId": "r_4f2a91c0d7e5b6a3",
+        "mode": "METRO",
+        "routeKey": "BLUE",
+        "routeLabel": "North-South / Blue Line",
+        "message": "Platform screen doors out of service at Park Street.",
+        "createdAt": "2026-10-06T09:14:22.000Z",
+        "expiresAt": "2026-10-07T09:14:22.000Z",
+        "anonymous": true,
+        "expiresInHours": 23
+      }
+    ],
+    "totalActive": 1,
+    "offset": 0,
+    "hasMore": false,
+    "ttlHours": 24,
+    "messageMaxLength": 500,
+    "posting": { "anonymous": true, "requiresAccount": false }
+  }
+}
+```
+
+`offset` is echoed back and `hasMore` is computed against `offset + reports.length`, so paging past the end reports that there is nothing further rather than promising a window that returns empty forever. The feed is ordered `created_at DESC`, and the newest window is the default one.
+
+Expiry is enforced in the `WHERE` clause of every read (`expires_at > NOW()`), so a post disappears on its own clock whether or not anything sweeps the table. `POST /api/admin/community/sweep` only reclaims the disk space on demand, and reports how many rows it removed so a sweep that deleted nothing is distinguishable from one that was never called.
+
+#### `POST /api/community/:mode/:route`
+
+```json
+{ "message": "Platform screen doors out of service at Park Street." }
+```
+
+The message is capped at `messageMaxLength` (500 characters), had control characters and repeated whitespace removed before storage, and is returned as the stored row so the caller can render what it just posted. It is plain text and is never rendered as HTML.
+
+Writes are rate limited per route (`COMMUNITY_POST_RATE_LIMIT_MAX` requests per `COMMUNITY_POST_RATE_LIMIT_WINDOW`, roughly "someone typing a few reports as they travel"); reads use the global limiter. Over the limit is `429 RATE_LIMITED`.
+
 ### Admin
 
 Disabled unless `ADMIN_KEY` is set. With no key they return `503 ADMIN_AUTH_REQUIRED` — failing closed, not open.
@@ -671,6 +734,7 @@ Send the key as `x-admin-key`.
 | `POST /api/admin/graph/refresh?force=true` | Rebuild the cached transport graph after a data change. |
 | `GET /api/admin/routes/aliases?mode=BUS` | List route-number mappings. |
 | `POST /api/admin/routes/alias` | Create or update one mapping. |
+| `POST /api/admin/community/sweep` | Delete community reports already past their 24-hour expiry. Returns how many rows went. |
 
 ```bash
 curl -X POST http://localhost:3000/api/admin/graph/refresh?force=true \
