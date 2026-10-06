@@ -3,7 +3,8 @@
  *
  * A report is a short piece of text a rider leaves about the route they are
  * about to travel. The scoping is the whole point: a post belongs to exactly one
- * route, and a feed shows only that route's posts.
+ * route, and a feed shows only that route's posts -- or, with no route in the
+ * path, every live post in the whole mode.
  *
  * There is no author anywhere in this shape, and that is deliberate rather than
  * unfinished. The service has no accounts, so a name field could only ever be
@@ -12,6 +13,15 @@
  */
 
 export type CommunityMode = "BUS" | "METRO" | "FERRY" | "TRAM";
+
+/**
+ * Sentinel key for a whole-mode feed: `scope_key` is `NOT NULL`, so rather than
+ * making the column nullable the whole mode reuses one row identity. A mode-wide
+ * post is stored under this key, and a mode-wide read ignores the key column
+ * entirely, which is what makes a feed of `/api/community/BUS` show every live
+ * bus report no matter which route was on it.
+ */
+export const MODE_WIDE_KEY = "*";
 
 /** How long a post stays visible, in hours. */
 export const REPORT_TTL_HOURS = 24;
@@ -32,6 +42,28 @@ export interface RouteScope {
   key: string;
   /** Human-readable name, for display only. Never used to group posts. */
   label: string;
+}
+
+/** Display label for a whole-mode feed, used where the route's name would be. */
+const MODE_NETWORK_LABELS: Record<CommunityMode, string> = {
+  BUS: "Bus network",
+  METRO: "Metro network",
+  FERRY: "Ferry network",
+  TRAM: "Tram network",
+};
+
+/**
+ * The scope of "/community/:mode" with no route in the path: the whole mode,
+ * not one route. Keyed with {@link MODE_WIDE_KEY} because `scope_key` is
+ * `NOT NULL`, and reads for it filter on mode alone so a post filed under any
+ * route stays visible in the mode's feed.
+ */
+export function modeScope(mode: CommunityMode): RouteScope {
+  return {
+    mode,
+    key: MODE_WIDE_KEY,
+    label: MODE_NETWORK_LABELS[mode],
+  };
 }
 
 export interface CommunityReport {

@@ -587,6 +587,8 @@ textarea:focus{outline:none; border-color:var(--metro); box-shadow:0 0 0 3px rgb
 .cm-feed{display:flex; flex-direction:column; gap:var(--sp-sm); margin-top:var(--sp-md)}
 .cm-meta{display:flex; align-items:center; gap:var(--sp-sm); flex-wrap:wrap; margin-bottom:6px}
 .cm-msg{font:400 13px/1.6 var(--sans); color:var(--ink)}
+/* Only whole-network feeds emit the tag, so it costs nothing on route feeds. */
+.cm-tag{font:600 11px/1 var(--mono); color:var(--ink); background:var(--surface-low); border:1px solid var(--outline); border-radius:999px; padding:3px 8px; letter-spacing:.02em}
 .cm-empty,.cm-note{
   padding:var(--sp-md); border-radius:var(--r); font:400 13px/1.6 var(--sans); color:var(--ink-2);
   background:var(--surface-low); border:1px solid var(--line);
@@ -1069,12 +1071,13 @@ dialog#cfg .btn--ghost{background:var(--surface-lowest)}
 
   <!-- ===================== Community ===================== -->
   <section class="panel" id="p-community" role="tabpanel" aria-labelledby="t-community" hidden>
-    <div class="note">
-      <b>What riders are reporting right now, on one route only.</b>
-      Open the community for a route and you will only ever see reports about that
-      route. Posts are anonymous text, and each one disappears 24 hours after it
-      is written.
-    </div>
+<div class="note">
+        <b>What riders are reporting right now.</b>
+        Metro reports are grouped by line: pick the line and you will only ever
+        see reports about that line. For bus, ferry and tram there is no route
+        picker - the feed is the whole network at once. Posts are anonymous text,
+        and each one disappears 24 hours after it is written.
+      </div>
 
     <div class="cm-pick">
       <div>
@@ -1086,7 +1089,7 @@ dialog#cfg .btn--ghost{background:var(--surface-lowest)}
           <option value="TRAM">Tram</option>
         </select>
       </div>
-      <div>
+      <div id="cmRouteCell">
         <label class="lab" for="cmRoute">Route</label>
         <select class="inp" id="cmRoute">
           <option value="" disabled selected>Choose a route</option>
@@ -1267,7 +1270,7 @@ function health() {
 }
 
 /* ============================ tabs ============================ */
-var TABS = [["plan", function () {}], ["routes", loadRoutes], ["ferry", function () { loadService("FERRY", "ferryList"); }], ["tram", function () { loadService("TRAM", "tramList"); }], ["stops", function () {}], ["network", loadNetwork], ["community", function () { cmRouteOptions($("#cmMode").value); }], ["api", buildExplorer]];
+var TABS = [["plan", function () {}], ["routes", loadRoutes], ["ferry", function () { loadService("FERRY", "ferryList"); }], ["tram", function () { loadService("TRAM", "tramList"); }], ["stops", function () {}], ["network", loadNetwork], ["community", cmSyncRoutePicker], ["api", buildExplorer]];
 /* These four live in the More sheet on a phone instead of holding a dock slot.
    The dock mirrors whichever one is open so the More item stays lit. */
 var MORE = ["stops", "network", "community", "api"];
@@ -1391,9 +1394,28 @@ function cmEmpty(text) {
 }
 
 /* ---------------- route picker ----------------
-   The route field is a dropdown rather than free text. Everything it offers
-   comes from the same tables the feed's own resolver reads, so a choice cannot
-   404, and nothing a rider could have typed is missing from it. */
+   Metro has six named lines, so picking the line is easy and the feed is that
+   one line's posts. Bus, ferry and tram have no picker: the feed for those
+   modes is the whole network, and the backend resolves that itself when the
+   request carries no route. `cmWantsRoute` is the one place that rule lives, so
+   the picker, the feed URL and the post URL cannot drift apart. */
+
+/** Whether the current mode asks for a specific route (only Metro does). */
+function cmWantsRoute() {
+  return $("#cmMode").value === "METRO";
+}
+
+/** "bus network", "ferry network", ... for copy that reads in a sentence. */
+function cmWhere(mode) {
+  return mode === "BUS" ? "bus network" : mode === "FERRY" ? "ferry network" : mode === "TRAM" ? "tram network" : "metro network";
+}
+
+/** Shows the picker only for Metro, and fills it only when it is on screen. */
+function cmSyncRoutePicker() {
+  var metro = cmWantsRoute();
+  $("#cmRouteCell").hidden = !metro;
+  if (metro) cmRouteOptions($("#cmMode").value);
+}
 
 /** Cache of already-fetched route lists, keyed by mode. */
 var cmRoutes = {};
@@ -1455,8 +1477,9 @@ function cmRouteOptions(mode) {
 
 function loadCommunity() {
   var mode = $("#cmMode").value;
-  var route = $("#cmRoute").value.trim();
-  if (!route) {
+  var metro = cmWantsRoute();
+  var route = metro ? $("#cmRoute").value.trim() : "";
+  if (metro && !route) {
     cmScope = null;
     cmReset();
     $("#cmWrite").hidden = true;
@@ -1465,8 +1488,8 @@ function loadCommunity() {
     return;
   }
 
-  cmEmpty("Loading reports for " + route + "...");
-  return api("/community/" + encodeURIComponent(mode) + "/" + encodeURIComponent(route),
+  cmEmpty("Loading reports for " + (metro ? route : "the " + cmWhere(mode)) + "...");
+  return api("/community/" + encodeURIComponent(mode) + (route ? "/" + encodeURIComponent(route) : ""),
     { query: { limit: cmPage, offset: cmOffset } })
     .then(function (res) {
       if (!res.ok || !res.json || !res.json.success) {
@@ -1516,12 +1539,18 @@ function loadCommunity() {
       }
 
       if (!list.length) {
-        cmEmpty("No reports for " + (cmScope ? cmScope.label : route) + " yet. Be the first to post.");
+        cmEmpty("No reports for " + (metro ? (cmScope ? cmScope.label : route) : "the " + cmWhere(mode)) + " yet. Be the first to post.");
       } else {
         $("#cmFeed").innerHTML = list.map(function (r) {
+          /* In a whole-network feed a post is only useful if the reader can see
+             which route it is about, so anything scoped to a route is tagged
+             with its label. Route-scoped feeds are already about one route, so
+             the tag would be noise there. */
+          var tag = cmScope && r.routeKey && r.routeKey !== cmScope.key ? r.routeLabel : "";
           return '<div class="cm-post' + (cmMine[r.reportId] ? " cm-post--mine" : "") + '">' +
             '<div class="cm-msg">' + esc(r.message) + "</div>" +
             '<div class="cm-meta">' +
+              (tag ? '<span class="cm-tag">' + esc(tag) + "</span>" : "") +
               (cmMine[r.reportId] ? "<b>posted from this browser</b>" : "<b>anonymous</b>") +
               '<span title="' + esc(r.createdAt) + '">' + esc(cmClock(r.createdAt)) + "</span>" +
               "<span>" + esc(cmAgo(r.createdAt)) + "</span>" +
@@ -1543,7 +1572,8 @@ function loadCommunity() {
       $("#cmNewer").hidden = !cmHistory.length;
       var note = $("#cmNote");
       note.textContent = "Posts are anonymous and last " + cmTtl + " hours, then they are deleted. " +
-        "Anyone can read the reports for " + (cmScope ? cmScope.label : route) + ", and only that route.";
+        "Anyone can read the reports for " +
+        (metro ? cmScope.label + ", and only that route" : "the " + cmWhere(mode)) + ".";
       note.hidden = !cmScope;
     });
 }
@@ -1556,7 +1586,13 @@ function postCommunity() {
 
   btn.disabled = true;
   box.innerHTML = "";
-  return api("/community/" + encodeURIComponent(cmScope.mode) + "/" + encodeURIComponent(cmScope.key), {
+  /* The scope's own mode is used, not the control's: a mode switch that happens
+     while the composer is open also clears cmScope, so by definition they agree.
+     A route is appended only when that mode wants one (Metro); otherwise the
+     request is mode-wide and the backend scopes it to the whole network. */
+  var url = "/community/" + encodeURIComponent(cmScope.mode);
+  if (cmWantsRoute()) url += "/" + encodeURIComponent(cmScope.key);
+  return api(url, {
     method: "POST", body: { message: text }
   }).then(function (res) {
     btn.disabled = false;
@@ -1590,10 +1626,10 @@ $("#cmRoute").addEventListener("change", function () {
 $("#cmMode").addEventListener("change", function () {
   cmScope = null;
   cmReset();
-  // Clear first: the old mode's selection is meaningless in the new mode's
-  // list, and it must not still be in the field when the feed is fetched.
-  $("#cmRoute").value = "";
-  cmRouteOptions($("#cmMode").value);
+  // The picker is Metro-only. For other modes the old line name is left in the
+  // hidden control (it is never read), so coming back to Metro restores the
+  // choice instead of starting from the prompt again.
+  cmSyncRoutePicker();
   loadCommunity();
 });
 $("#cmPost").addEventListener("click", postCommunity);
@@ -2571,6 +2607,11 @@ var ENDPOINTS = [
   { g: "Ferry · live", m: "GET", p: "/ferry/ghats" },
   { g: "Ferry · live", m: "GET", p: "/ferry/search" },
   { g: "Ferry · live", m: "GET", p: "/ferry/diagnostics" },
+  { g: "Community", m: "GET", p: "/community/:mode", pv: "mode",
+    q: [["mode", "BUS | METRO | FERRY | TRAM", "BUS"], ["limit", "1-100", "20"], ["offset", "number", "0"]] },
+  { g: "Community", m: "POST", p: "/community/:mode", pv: "mode",
+    q: [["mode", "BUS | METRO | FERRY | TRAM", "BUS"]],
+    body: '{\n  "message": "Most of Shyambazar to Calcatta run is crawling since morning."\n}' },
   { g: "Community", m: "GET", p: "/community/:mode/:route", pv: "mode,route",
     q: [["mode", "BUS | METRO | FERRY | TRAM", "METRO"], ["route", "path", "BLUE"], ["limit", "1-100", "20"], ["offset", "number", "0"]] },
   { g: "Community", m: "POST", p: "/community/:mode/:route", pv: "mode,route",

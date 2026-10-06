@@ -2,6 +2,7 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { AppError, ErrorCode } from "../utils/errors.js";
 import {
+  modeScope,
   REPORT_MESSAGE_MAX_LENGTH,
   type CommunityMode,
 } from "../models/community.model.js";
@@ -12,37 +13,45 @@ import {
   resolveRouteScope,
   sweepExpired,
 } from "../repositories/community.repository.js";
+import type { RouteScope } from "../models/community.model.js";
 import { handle, parseOrThrow } from "./base.controller.js";
 
 /**
- * Route-scoped community reports.
+ * Community reports, scoped to one route or to a whole mode.
  *
  * GET  /api/community/:mode/:route  -- the feed for one route, newest first:
  *        `limit` and `offset` page it, and the feed says whether more remains
  *        past the window that was returned.
  * POST /api/community/:mode/:route  -- leave a report about that route
+ * GET  /api/community/:mode         -- every live report in the mode, whatever
+ *        route each one is filed under (this is what the client asks for when
+ *        no route picker applies, e.g. Bus).
+ * POST /api/community/:mode         -- leave a report about the whole mode
  *
  * Posts are anonymous text that live for 24 hours. There is no account system
  * in this service, so nothing here pretends to know who wrote a post; see
  * community.model.ts for why that is a decision rather than a gap.
  *
- * The route in the path is always resolved against the real route tables before
+ * A route in the path is always resolved against the real route tables before
  * anything is written. A post about a route that does not exist would be
  * invisible to everyone forever, because the feed can only ever be fetched by a
- * real route, so accepting one would be a silent data loss bug.
+ * real route, so accepting one would be a silent data loss bug. A mode-only
+ * path needs no resolution: the whole mode is a scope of its own.
  */
 
 const modeSchema = z.enum(["BUS", "METRO", "FERRY", "TRAM"]);
 
-const routeParamSchema = z.object({
+const scopeParamSchema = z.object({
   mode: modeSchema,
   // Same reason as the connections route: real route numbers include
-  // "T-2 (Khidirpur)" and "C-11/1".
+  // "T-2 (Khidirpur)" and "C-11/1". Absent on /community/:mode, which is the
+  // whole-mode feed.
   route: z
     .string()
     .trim()
     .min(1, "route is required")
-    .max(64, "route must be at most 64 characters"),
+    .max(64, "route must be at most 64 characters")
+    .optional(),
 });
 
 const feedQuerySchema = z.object({
@@ -66,13 +75,21 @@ const postBodySchema = z.object({
     ),
 });
 
-/** Resolves the route, or fails with a message naming the mode that was asked for. */
-async function requireScope(mode: CommunityMode, route: string) {
-  const scope = await resolveRouteScope(mode, route);
+/**
+ * Resolves the scope the path asked for, or fails with a message naming the
+ * mode that was asked for. A mode-only path is the whole mode itself; a route
+ * in the path is resolved against the route tables as before.
+ */
+async function scopeFromParams(params: {
+  mode: CommunityMode;
+  route?: string;
+}): Promise<RouteScope> {
+  if (params.route === undefined) return modeScope(params.mode);
+  const scope = await resolveRouteScope(params.mode, params.route);
   if (!scope) {
     throw new AppError(
       ErrorCode.ROUTE_NOT_FOUND,
-      `No ${mode} route matching "${route}" was found, so there is no community to post to.`,
+      `No ${params.mode} route matching "${params.route}" was found, so there is no community to post to.`,
     );
   }
   return scope;
@@ -83,9 +100,9 @@ export async function getCommunityFeed(
   reply: FastifyReply,
 ): Promise<FastifyReply> {
   return handle(reply, async () => {
-    const params = parseOrThrow(routeParamSchema, request.params);
+    const params = parseOrThrow(scopeParamSchema, request.params);
     const query = parseOrThrow(feedQuerySchema, request.query);
-    const scope = await requireScope(params.mode, params.route);
+    const scope = await scopeFromParams(params);
     return listReports(scope, query.limit, query.offset);
   });
 }
@@ -95,7 +112,7 @@ export async function postCommunityReport(
   reply: FastifyReply,
 ): Promise<FastifyReply> {
   return handle(reply, async () => {
-    const params = parseOrThrow(routeParamSchema, request.params);
+    const params = parseOrThrow(scopeParamSchema, request.params);
     const body = parseOrThrow(postBodySchema, request.body);
 
     const message = normaliseMessage(body.message);
@@ -109,7 +126,7 @@ export async function postCommunityReport(
       );
     }
 
-    const scope = await requireScope(params.mode, params.route);
+    const scope = await scopeFromParams(params);
     // 201: a report was created, and the caller gets the stored row back so it
     // can render the post it just made without refetching the feed.
     return createReport(scope, message);

@@ -6,8 +6,10 @@ import {
   withDatabaseErrors,
 } from "./base.repository.js";
 import {
+  MODE_WIDE_KEY,
   REPORT_MESSAGE_MAX_LENGTH,
   REPORT_TTL_HOURS,
+  modeScope,
   type CommunityFeed,
   type CommunityMode,
   type CommunityReport,
@@ -22,7 +24,10 @@ import {
  *     identity the data set uses, or returns null. Grouping is done on that
  *     canonical key and never on the display label, so "Blue Line" and
  *     "North-South / Blue Line" cannot become two separate communities.
- *   - Everything else reads and writes `community_reports`.
+ *   - Everything else reads and writes `community_reports`. A scope may be a
+ *     single route, or the whole mode via {@link modeScope}, whose sentinel key
+ *     makes the feed read every live report in the mode whatever route it is
+ *     filed under.
  *
  * Expiry is enforced in SQL on every read (expires_at > NOW()), so a post
  * disappears the moment it is due. The periodic sweep below only reclaims disk
@@ -237,22 +242,37 @@ async function listReportsUnguarded(
   // process down over a background delete.
   void sweepExpired().catch(() => undefined);
 
+  // The whole-mode feed ignores the key column so a post filed under any route
+  // stays visible in its mode's feed. Kept as one string per shape rather than
+  // concatenated, because concatenation is how a column name leaks into a plan
+  // that the scope index cannot serve. The placeholders are numbered per shape
+  // too, so mode-wide arguments do not jump over a parameter that is not there.
+  const modeWide = scope.key === MODE_WIDE_KEY;
   const rows = await query<Row>(
-    `SELECT report_id, scope_mode, scope_key, scope_label, message, created_at, expires_at
-       FROM community_reports
-      WHERE scope_mode = $1
-        AND scope_key = $2
-        AND expires_at > NOW()
-      ORDER BY created_at DESC, report_id DESC
-      LIMIT $3 OFFSET $4`,
-    [scope.mode, scope.key, limit, offset],
+    modeWide
+      ? `SELECT report_id, scope_mode, scope_key, scope_label, message, created_at, expires_at
+           FROM community_reports
+          WHERE scope_mode = $1 AND expires_at > NOW()
+          ORDER BY created_at DESC, report_id DESC
+          LIMIT $2 OFFSET $3`
+      : `SELECT report_id, scope_mode, scope_key, scope_label, message, created_at, expires_at
+           FROM community_reports
+          WHERE scope_mode = $1 AND scope_key = $2 AND expires_at > NOW()
+          ORDER BY created_at DESC, report_id DESC
+          LIMIT $3 OFFSET $4`,
+    modeWide
+      ? [scope.mode, limit, offset]
+      : [scope.mode, scope.key, limit, offset],
   );
 
   const total = await queryOne<Row>(
     `SELECT COUNT(*)::int AS total
        FROM community_reports
-      WHERE scope_mode = $1 AND scope_key = $2 AND expires_at > NOW()`,
-    [scope.mode, scope.key],
+       WHERE scope_mode = $1
+         AND ${modeWide ? "" : "scope_key = $2 AND "}expires_at > NOW()`,
+    modeWide
+      ? [scope.mode]
+      : [scope.mode, scope.key],
   );
 
   const reports = (rows as Row[]).map(toReport);

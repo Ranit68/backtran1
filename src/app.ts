@@ -188,6 +188,8 @@ await api.register(adminRoutes);
         journey: "POST /api/journey",
         connections: "GET /api/routes/:routeNo/connections?mode=",
         community: [
+          "GET /api/community/:mode",
+          "POST /api/community/:mode",
           "GET /api/community/:mode/:route",
           "POST /api/community/:mode/:route",
         ],

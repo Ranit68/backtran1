@@ -663,13 +663,19 @@ No ferry CSV was supplied, and the specification forbids inventing the schema.
 
 ### Community
 
-Anonymous reports about one route, written by whoever is on it. Posts live for 24 hours and are then gone. There is no account system in this service, so nothing here pretends to know who wrote a post.
+Anonymous reports from whoever is on the vehicle. Metro reports are grouped by line, so the client picks a line and sees only that line's posts; Bus, Ferry and Tram have no route picker and use the whole-mode feed instead. Posts live for 24 hours and are then gone. There is no account system in this service, so nothing here pretends to know who wrote a post.
 
 | Endpoint | Purpose |
 | --- | --- |
+| `GET /api/community/:mode` | Every live report in the mode, whatever route filed it. |
+| `POST /api/community/:mode` | Leave a report about the whole mode. Returns `201`. |
 | `GET /api/community/:mode/:route` | The feed for one route, newest first. |
 | `POST /api/community/:mode/:route` | Leave a report on that route. Returns `201`. |
 | `POST /api/admin/community/sweep` | Delete posts already past their expiry. Returns `{"removed": n}`. Admin key required. |
+
+#### `GET /api/community/:mode`
+
+The bare-path feed is what Bus, Ferry and Tram ask for when no route picker applies: every live report in that mode, whatever route each one was filed under. Its `scope.key` is the sentinel `"*"`, and a report made at this scope is stored under that key too, so a mode-wide post and a route-scoped post share one feed without the mode-wide read having to match keys.
 
 #### `GET /api/community/:mode/:route`
 
@@ -712,6 +718,10 @@ Anonymous reports about one route, written by whoever is on it. Posts live for 2
 
 Expiry is enforced in the `WHERE` clause of every read (`expires_at > NOW()`), so a post disappears on its own clock whether or not anything sweeps the table. `POST /api/admin/community/sweep` only reclaims the disk space on demand, and reports how many rows it removed so a sweep that deleted nothing is distinguishable from one that was never called.
 
+#### `POST /api/community/:mode`
+
+The whole-mode form: reports are stored under `scope_key = "*"` with the mode's network label, appear in `GET /api/community/:mode`, and do not appear in any single route's feed, because the route feed matches on a real route key.
+
 #### `POST /api/community/:mode/:route`
 
 ```json
@@ -720,7 +730,7 @@ Expiry is enforced in the `WHERE` clause of every read (`expires_at > NOW()`), s
 
 The message is capped at `messageMaxLength` (500 characters), had control characters and repeated whitespace removed before storage, and is returned as the stored row so the caller can render what it just posted. It is plain text and is never rendered as HTML.
 
-Writes are rate limited per route (`COMMUNITY_POST_RATE_LIMIT_MAX` requests per `COMMUNITY_POST_RATE_LIMIT_WINDOW`, roughly "someone typing a few reports as they travel"); reads use the global limiter. Over the limit is `429 RATE_LIMITED`.
+Writes are rate limited per scope (`COMMUNITY_POST_RATE_LIMIT_MAX` requests per `COMMUNITY_POST_RATE_LIMIT_WINDOW`, roughly "someone typing a few reports as they travel"); reads use the global limiter. Over the limit is `429 RATE_LIMITED`.
 
 ### Admin
 

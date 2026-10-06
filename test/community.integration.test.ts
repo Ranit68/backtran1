@@ -42,6 +42,7 @@ let normaliseMessage: typeof import("../src/repositories/community.repository.js
 let createReport: typeof import("../src/repositories/community.repository.js").createReport;
 let listReports: typeof import("../src/repositories/community.repository.js").listReports;
 let resolveRouteScope: typeof import("../src/repositories/community.repository.js").resolveRouteScope;
+let modeScope: typeof import("../src/models/community.model.js").modeScope;
 let sweepExpired: typeof import("../src/repositories/community.repository.js").sweepExpired;
 let query: typeof import("../src/config/database.js").query;
 
@@ -92,6 +93,7 @@ const HOUR_MS = 3_600_000;
 beforeAll(async () => {
   const repo = await import("../src/repositories/community.repository.js");
   ({ normaliseMessage, createReport, listReports, resolveRouteScope, sweepExpired } = repo);
+  ({ modeScope } = await import("../src/models/community.model.js"));
   if (!hasDatabase) return;
   const db = await import("../src/config/database.js");
   ({ closePool, query } = db);
@@ -459,6 +461,70 @@ describe.skipIf(!hasDatabase)("GET /api/community/:mode/:route", () => {
     expect((await get("/api/community/METRO/BLUE?limit=0")).status).toBe(400);
     expect((await get("/api/community/METRO/BLUE?limit=101")).status).toBe(400);
     expect((await get("/api/community/METRO/BLUE?limit=notanumber")).status).toBe(400);
+  });
+});
+
+describe.skipIf(!hasDatabase)("GET /api/community/:mode", () => {
+  it("returns every live report in the mode, whatever route filed it", async () => {
+    // The whole-network feed is what Bus, Ferry and Tram get when there is no
+    // route picker. A post made about "AC-4" and one made about "the network"
+    // must both be visible there, and a Metro post must not be.
+    await query("DELETE FROM community_reports");
+    await post("/api/community/METRO/BLUE", { message: "blue line report" });
+    await post("/api/community/BUS/AC-4", { message: "route report" });
+    await post("/api/community/BUS", { message: "network report" });
+
+    const bus = await get<FeedBody>("/api/community/BUS");
+    expect(bus.status).toBe(200);
+    const feed = bus.body.data!;
+    expect(feed.scope).toEqual({ mode: "BUS", key: "*", label: "Bus network" });
+    expect(feed.reports.map((r) => r.message).sort()).toEqual(["network report", "route report"]);
+    expect(feed.totalActive).toBe(2);
+
+    const metro = await get<FeedBody>("/api/community/METRO");
+    expect(metro.status).toBe(200);
+    const metroFeed = metro.body.data!;
+    expect(metroFeed.reports.map((r) => r.message)).toEqual(["blue line report"]);
+  });
+
+  it("says one mode's report is not in another mode's feed", async () => {
+    await query("DELETE FROM community_reports");
+    await post("/api/community/TRAM", { message: "tram network report" });
+
+    const tram = await get<FeedBody>("/api/community/TRAM");
+    expect(tram.status).toBe(200);
+    expect(tram.body.data!.reports).toHaveLength(1);
+
+    const ferry = await get<FeedBody>("/api/community/FERRY");
+    expect(ferry.body.data!.reports).toEqual([]);
+    expect(ferry.body.data!.totalActive).toBe(0);
+  });
+
+  it("pages a whole-network feed with offset like any other", async () => {
+    await query("DELETE FROM community_reports");
+    for (let i = 0; i < 4; i++) await post("/api/community/BUS/AC-4", { message: `report ${i}` });
+
+    const page = await get<FeedBody>("/api/community/BUS?limit=2");
+    expect(page.body.data!.reports).toHaveLength(2);
+    expect(page.body.data!.totalActive).toBe(4);
+    expect(page.body.data!.hasMore).toBe(true);
+
+    const rest = await get<FeedBody>("/api/community/BUS?limit=2&offset=2");
+    expect(rest.status).toBe(200);
+    expect(rest.body.data!.offset).toBe(2);
+    expect(rest.body.data!.reports).toHaveLength(2);
+    expect(rest.body.data!.hasMore).toBe(false);
+  });
+
+  it("rejects an unknown mode on the bare path", async () => {
+    expect((await get("/api/community/CABLECAR")).status).toBe(400);
+  });
+});
+
+describe("modeScope", () => {
+  it("is the whole mode, keyed so reads ignore the key column", () => {
+    expect(modeScope("BUS")).toEqual({ mode: "BUS", key: "*", label: "Bus network" });
+    expect(modeScope("TRAM")).toEqual({ mode: "TRAM", key: "*", label: "Tram network" });
   });
 });
 

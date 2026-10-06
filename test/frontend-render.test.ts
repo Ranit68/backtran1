@@ -528,6 +528,50 @@ describe("community route picker", () => {
   it("keeps the rider's choice when the same list comes back", () => {
     expect(html).toContain("if (keep && pairs.some(function (p) { return p.value === keep; })) sel.value = keep;");
   });
+
+  it("shows the picker only for Metro, and reads the rule from the same helper everywhere", () => {
+    expect(html).toContain('<div id="cmRouteCell">');
+    expect(html).toContain('function cmWantsRoute()');
+    expect(html).toContain('return $("#cmMode").value === "METRO";');
+    expect(html).toContain('$("#cmRouteCell").hidden = !metro;');
+    // Opening the tab and switching mode both go through the one sync helper.
+    expect(html).toContain('["community", cmSyncRoutePicker]');
+    expect(html).toContain('cmSyncRoutePicker();');
+  });
+
+  it("names a whole-mode compass plainly", () => {
+    const { cmWhere } = load("cmWhere") as { cmWhere: (mode: string) => string };
+    expect(cmWhere("BUS")).toBe("bus network");
+    expect(cmWhere("FERRY")).toBe("ferry network");
+    expect(cmWhere("TRAM")).toBe("tram network");
+    expect(cmWhere("METRO")).toBe("metro network");
+  });
+});
+
+describe("community whole-mode feeds", () => {
+  it("fetches bus, ferry and tram with no route in the path", () => {
+    // Only Metro needs a route on the frontend. The backend scopes the bare
+    // /community/:mode request to the whole network by itself.
+    expect(html).toContain('var route = metro ? $("#cmRoute").value.trim() : "";');
+    expect(html).toContain('api("/community/" + encodeURIComponent(mode) + (route ? "/" + encodeURIComponent(route) : "")');
+  });
+
+  it("posts to the whole mode, not through a route, for modes that have no picker", () => {
+    const post = extract("postCommunity");
+    expect(post).toContain('var url = "/community/" + encodeURIComponent(cmScope.mode);');
+    expect(post).toContain('if (cmWantsRoute()) url += "/" + encodeURIComponent(cmScope.key);');
+  });
+
+  it("tags a route-scoped post inside a network feed, and nothing in a route feed", () => {
+    // In a whole-network feed the reader must be able to tell which route a
+    // post is about; in a route feed every post is about that route already.
+    expect(html).toContain('var tag = cmScope && r.routeKey && r.routeKey !== cmScope.key ? r.routeLabel : "";');
+  });
+
+  it("offers the whole-mode endpoints in the API explorer", () => {
+    expect(html).toContain('{ g: "Community", m: "GET", p: "/community/:mode", pv: "mode"');
+    expect(html).toContain('{ g: "Community", m: "POST", p: "/community/:mode", pv: "mode"');
+  });
 });
 
 describe("departures", () => {
