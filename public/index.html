@@ -1088,12 +1088,14 @@ dialog#cfg .btn--ghost{background:var(--surface-lowest)}
       </div>
       <div>
         <label class="lab" for="cmRoute">Route</label>
-        <input class="inp" id="cmRoute" placeholder="BLUE, or North-South / Blue Line" autocomplete="off">
+        <select class="inp" id="cmRoute">
+          <option value="" disabled selected>Choose a route</option>
+        </select>
       </div>
       <div><button class="btn btn--ghost" id="cmGo" type="button">Open</button></div>
     </div>
 
-    <p class="hint" id="cmHint">Pick a route to see its reports.</p>
+    <p class="hint" id="cmHint">Choose a route from the list to see its reports.</p>
 
     <div class="cm-write" id="cmWrite" hidden>
       <div>
@@ -1265,7 +1267,7 @@ function health() {
 }
 
 /* ============================ tabs ============================ */
-var TABS = [["plan", function () {}], ["routes", loadRoutes], ["ferry", function () { loadService("FERRY", "ferryList"); }], ["tram", function () { loadService("TRAM", "tramList"); }], ["stops", function () {}], ["network", loadNetwork], ["community", function () {}], ["api", buildExplorer]];
+var TABS = [["plan", function () {}], ["routes", loadRoutes], ["ferry", function () { loadService("FERRY", "ferryList"); }], ["tram", function () { loadService("TRAM", "tramList"); }], ["stops", function () {}], ["network", loadNetwork], ["community", function () { cmRouteOptions($("#cmMode").value); }], ["api", buildExplorer]];
 /* These four live in the More sheet on a phone instead of holding a dock slot.
    The dock mirrors whichever one is open so the More item stays lit. */
 var MORE = ["stops", "network", "community", "api"];
@@ -1387,6 +1389,70 @@ function cmCount() {
 function cmEmpty(text) {
   $("#cmFeed").innerHTML = '<div class="cm-empty">' + esc(text) + "</div>";
 }
+
+/* ---------------- route picker ----------------
+   The route field is a dropdown rather than free text. Everything it offers
+   comes from the same tables the feed's own resolver reads, so a choice cannot
+   404, and nothing a rider could have typed is missing from it. */
+
+/** Cache of already-fetched route lists, keyed by mode. */
+var cmRoutes = {};
+
+/**
+ * Turns a mode's route rows into the {value,label} pairs the dropdown shows.
+ *
+ * `value` is what goes in the community path, so it is the identifier the feed's
+ * resolver matches on - the route number for Bus, the line for Metro, the route
+ * id for Ferry and Tram - never a display name, which is not guaranteed unique.
+ * `label` leads with that identifier because that is what riders say out loud,
+ * then adds the name where the API sends one.
+ */
+function cmRoutePairs(mode, items) {
+  return (items || []).map(function (r) {
+    if (mode === "FERRY") return { value: r.route_id, label: r.route_id + " \u00b7 " + (r.route_name || r.route_id) };
+    if (mode === "TRAM") return { value: r.route_id, label: (r.route_no ? r.route_no + " \u00b7 " : "") + (r.route_name || r.route_id) };
+    if (mode === "METRO") return { value: r.routeNo, label: r.routeNo + " \u00b7 " + (r.name || r.routeNo) };
+    return { value: r.routeNo, label: r.routeNo + (r.depot ? " \u00b7 " + r.depot : "") };
+  }).filter(function (p) { return p && p.value; });
+}
+
+/** Rebuilds the dropdown. The first option is the prompt; it stays selected
+    unless the choice already in the field survives into the new list, which is
+    what stops reopening the tab from emptying a picker the rider filled in. */
+function cmFillRoutes(sel, pairs, prompt) {
+  var keep = sel.value;
+  sel.innerHTML = '<option value="" disabled selected>' + esc(prompt) + "</option>" +
+    pairs.map(function (p) {
+      return '<option value="' + esc(p.value) + '">' + esc(p.label) + "</option>";
+    }).join("");
+  if (keep && pairs.some(function (p) { return p.value === keep; })) sel.value = keep;
+}
+
+/**
+ * Populates the dropdown for one mode, from cache when it has been seen before.
+ *
+ * The list is fetched with the same limit the routes panel uses, so a mode is
+ * never sampled. Two things are guarded: the prompt is written synchronously so
+ * a mode switch never sees the previous mode's routes for even a frame, and a
+ * response that arrives after the mode was switched again is dropped rather
+ * than repainting the list with the wrong mode's routes.
+ */
+function cmRouteOptions(mode) {
+  var sel = $("#cmRoute");
+  if (cmRoutes[mode]) { cmFillRoutes(sel, cmRoutes[mode], "Choose a route"); return; }
+  cmFillRoutes(sel, [], "Loading routes\u2026");
+  api("/" + mode.toLowerCase() + "/routes", { query: { limit: 200 } }).then(function (res) {
+    if ($("#cmMode").value !== mode) return;
+    var data = res.ok && res.json && res.json.data;
+    // Not cached on failure, so coming back to the mode retries instead of
+    // sticking a permanent empty list on the control.
+    if (!data) { cmFillRoutes(sel, [], "Could not load routes"); return; }
+    var pairs = cmRoutePairs(mode, data.items || data.routes || []);
+    cmRoutes[mode] = pairs;
+    cmFillRoutes(sel, pairs, pairs.length ? "Choose a route" : "No routes published");
+  });
+}
+
 function loadCommunity() {
   var mode = $("#cmMode").value;
   var route = $("#cmRoute").value.trim();
@@ -1395,7 +1461,7 @@ function loadCommunity() {
     cmReset();
     $("#cmWrite").hidden = true;
     $("#cmNote").hidden = true;
-    cmEmpty("Pick a route to see its reports.");
+    cmEmpty("Choose a route from the list to see its reports.");
     return;
   }
 
@@ -1514,10 +1580,22 @@ function postCommunity() {
   }).catch(function () { btn.disabled = false; });
 }
 $("#cmGo").addEventListener("click", function () { cmReset(); loadCommunity(); });
-$("#cmRoute").addEventListener("keydown", function (e) {
-  if (e.key === "Enter") { cmReset(); loadCommunity(); }
+// The route field is a <select>, so by the time change fires the value is
+// already the identifier the feed wants. There are no keystrokes to read.
+$("#cmRoute").addEventListener("change", function () {
+  if (!this.value) return;
+  cmReset();
+  loadCommunity();
 });
-$("#cmMode").addEventListener("change", function () { if (cmScope) cmScope = null; cmReset(); loadCommunity(); });
+$("#cmMode").addEventListener("change", function () {
+  cmScope = null;
+  cmReset();
+  // Clear first: the old mode's selection is meaningless in the new mode's
+  // list, and it must not still be in the field when the feed is fetched.
+  $("#cmRoute").value = "";
+  cmRouteOptions($("#cmMode").value);
+  loadCommunity();
+});
 $("#cmPost").addEventListener("click", postCommunity);
 $("#cmText").addEventListener("input", cmCount);
 $("#cmOlder").addEventListener("click", function () {

@@ -486,6 +486,50 @@ describe("community feed paging", () => {
   });
 });
 
+describe("community route picker", () => {
+  const { cmRoutePairs } = load("cmRoutePairs") as {
+    cmRoutePairs: (mode: string, items: unknown[]) => { value: string; label: string }[];
+  };
+
+  it("is a dropdown, not a field a rider has to know the route number for", () => {
+    // The old field was free text, which asked a rider to spell "North-South /
+    // Blue Line" correctly and 404'd on anything they got wrong.
+    expect(html).toContain('<select class="inp" id="cmRoute">');
+    expect(html).not.toMatch(/<input[^>]*id="cmRoute"/);
+    expect(html).toContain('$("#cmRoute").addEventListener("change"');
+  });
+
+  it("sends the identifier the feed's resolver matches on", () => {
+    // Copied from live /api/<mode>/routes responses. A display name is not a
+    // safe value: it is neither guaranteed unique nor what the resolver prefers.
+    const metro = cmRoutePairs("METRO", [{ routeNo: "BLUE", name: "North-South / Blue Line" }]);
+    expect(metro).toEqual([{ value: "BLUE", label: "BLUE \u00b7 North-South / Blue Line" }]);
+
+    expect(cmRoutePairs("BUS", [{ routeNo: "AC-3", depot: "Barasat Depot" }])[0]!.value).toBe("AC-3");
+    expect(cmRoutePairs("FERRY", [{ route_id: "F001", route_name: "HOWRAH-ARMENIAN" }])[0]!.value).toBe("F001");
+    expect(cmRoutePairs("TRAM", [{ route_id: "TRAM5", route_no: "25", route_name: "Gariahat-Esplanade" }])[0]!.value)
+      .toBe("TRAM5");
+  });
+
+  it("offers nothing that would 404", () => {
+    // A row with no identifier still renders in the routes panel, but as a
+    // community choice it would produce an empty path segment.
+    expect(cmRoutePairs("BUS", [{ routeNo: null, depot: "Khidirpur Depot" }, { routeNo: "AC-3" }]))
+      .toEqual([{ value: "AC-3", label: "AC-3" }]);
+  });
+
+  it("loads the full list for the mode and ignores a response that arrives late", () => {
+    expect(html).toContain('api("/" + mode.toLowerCase() + "/routes", { query: { limit: 200 } })');
+    // Switching Metro to Bus while Metro's list is in flight must not repaint
+    // the picker with Metro's routes under Bus.
+    expect(html).toContain('if ($("#cmMode").value !== mode) return;');
+  });
+
+  it("keeps the rider's choice when the same list comes back", () => {
+    expect(html).toContain("if (keep && pairs.some(function (p) { return p.value === keep; })) sel.value = keep;");
+  });
+});
+
 describe("departures", () => {
   const { projectDepartures, depCountdown, hhmmToMin, minToHHMM } = load(
     "nowMin",
