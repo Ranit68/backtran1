@@ -124,6 +124,33 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   // -------------------------------------------------------------------------
+  // Input hygiene
+  //
+  // PostgreSQL cannot store a NUL byte (and a control character in general has
+  // no meaning in a route number, station id or search term). Length checks do
+  // not catch it, so without this guard such a byte travels through validation
+  // into a parameterised query and comes back as a driver error: a raw 500 on a
+  // path that skips the database wrapper, or a misleading 503 everywhere else,
+  // for what is really a malformed request. Rejecting it once here turns every
+  // one of those into the documented 400 and means no current or future
+  // endpoint has to remember the rule. Only params and query are inspected:
+  // the one request body string that reaches SQL (a community message) is
+  // already normalised by its own handler.
+  // -------------------------------------------------------------------------
+  app.addHook("preValidation", async (request) => {
+    const offender =
+      findControlCharacter(request.params, "params") ??
+      findControlCharacter(request.query, "query");
+    if (offender) {
+      throw new AppError(
+        ErrorCode.VALIDATION_ERROR,
+        "The request contains a control character, which is not allowed in a URL parameter or query value.",
+        [{ field: offender, message: "must not contain control characters" }],
+      );
+    }
+  });
+
+  // -------------------------------------------------------------------------
   // Routes -- all under /api so the same app can sit behind any host.
   // -------------------------------------------------------------------------
   app.register(
@@ -210,3 +237,33 @@ await api.register(adminRoutes);
 }
 
 export { getGraphStatus };
+
+/**
+ * Control characters, including NUL. DEL is included because it is likewise
+ * never meaningful in an identifier or query term; the C1 range is left alone
+ * because those bytes are representable in PostgreSQL and harmless.
+ */
+const CONTROL_CHARACTER = /[\u0000-\u001F\u007F]/;
+
+/**
+ * Returns the path of the first string value containing a control character, or
+ * null when the input is clean. Walks arrays and plain objects so a repeated
+ * query parameter (`?q=a&q=b`) is covered, not just the first value.
+ */
+function findControlCharacter(value: unknown, path: string): string | null {
+  if (typeof value === "string") return CONTROL_CHARACTER.test(value) ? path : null;
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      const found = findControlCharacter(value[index], `${path}[${index}]`);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [key, nested] of Object.entries(value)) {
+      const found = findControlCharacter(nested, path ? `${path}.${key}` : key);
+      if (found) return found;
+    }
+  }
+  return null;
+}

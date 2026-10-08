@@ -144,16 +144,18 @@ export async function countTramRoutes(status?: string): Promise<number> {
  */
 async function resolveTramRouteId(supplied: string): Promise<string> {
   const trimmed = supplied.trim().toUpperCase();
-  const byId = await queryOne<{ route_id: string }>(
-    `SELECT route_id FROM tram_routes WHERE route_id = $1`,
-    [trimmed],
-  );
-  if (byId) return byId.route_id;
-  const byNumber = await queryOne<{ route_id: string }>(
-    `SELECT route_id FROM tram_routes WHERE UPPER(TRIM(route_no)) = $1 ORDER BY route_id ASC LIMIT 1`,
-    [trimmed],
-  );
-  return byNumber?.route_id ?? trimmed;
+  // Wrapped like every other query here: this runs before the callers' own
+  // wrapper, so an unexpected driver failure would otherwise escape as a bare
+  // 500 instead of the documented DATABASE_UNAVAILABLE.
+  return withDatabaseErrors(async () => {
+    const byId = await queryOne<{ route_id: string }>(`SELECT route_id FROM tram_routes WHERE route_id = $1`, [trimmed]);
+    if (byId) return byId.route_id;
+    const byNumber = await queryOne<{ route_id: string }>(
+      `SELECT route_id FROM tram_routes WHERE UPPER(TRIM(route_no)) = $1`,
+      [trimmed],
+    );
+    return byNumber?.route_id ?? trimmed;
+  });
 }
 
 export async function getTramRoute(routeId: string): Promise<TramRouteRow | null> {

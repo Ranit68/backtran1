@@ -213,6 +213,63 @@ describe("request validation", () => {
   });
 });
 
+describe("input hygiene", () => {
+  // A NUL byte cannot be stored in a PostgreSQL text column, so before the
+  // guard it travelled through length validation into a query and came back as
+  // a driver error: a raw 500 on paths without the database wrapper, a
+  // misleading 503 on the rest. These assert the single boundary now catches it
+  // as the 400 it actually is, before any handler or database is reached.
+  it("rejects a control character in a path parameter with a 400", async () => {
+    const response = await app.inject({ method: "GET", url: "/api/bus/routes/%00" });
+
+    expect(response.statusCode).toBe(400);
+    const body = response.json();
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe("VALIDATION_ERROR");
+    expect(JSON.stringify(body.error.details)).toContain("control");
+  });
+
+  it("rejects a control character in a query value with a 400", async () => {
+    const response = await app.inject({ method: "GET", url: "/api/search?q=%00" });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("rejects other control characters such as tab and newline", async () => {
+    for (const encoded of ["%09", "%0A", "%1F", "%7F"]) {
+      const response = await app.inject({ method: "GET", url: `/api/metro/stations/${encoded}` });
+      expect(response.statusCode, encoded).toBe(400);
+    }
+  });
+
+  it("rejects a control character on a write request before the handler runs", async () => {
+    // The guard covers params and query for every method, so a POST is covered
+    // too. This uses /api/journey rather than the community write route because
+    // that route carries its own throttle, which deliberately runs before
+    // validation and would mask the 400 once its budget is spent.
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/journey?source=%00",
+      payload: { source: "Esplanade", destination: "Howrah" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = response.json();
+    expect(body.error.code).toBe("VALIDATION_ERROR");
+    expect(body.error.details[0].field).toBe("query.source");
+  });
+
+  it("leaves an ordinary request untouched", async () => {
+    // No database in this suite, so the documented answer is 503. The point is
+    // that the guard did not turn a valid request into a 400.
+    const response = await app.inject({ method: "GET", url: "/api/search?q=esplanade" });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json().error.code).toBe("DATABASE_NOT_CONFIGURED");
+  });
+});
+
 describe("Metro and Ferry", () => {
   it("reports the missing database on a Metro data endpoint, not an empty list", async () => {
     const response = await app.inject({ method: "GET", url: "/api/metro/stations" });

@@ -1,4 +1,5 @@
 import { query } from "../config/database.js";
+import { requireDatabase, withDatabaseErrors } from "./base.repository.js";
 
 /**
  * Cross-mode service windows and interchange platforms.
@@ -463,8 +464,20 @@ async function findFerryAndTram(names: string[], exclude: string): Promise<Ferry
  *
  * Resolves one route, then reports what else can be caught from it and when
  * those services run.
+ *
+ * The whole body runs inside the database wrapper: this module had no error
+ * handling of its own, so a driver failure (or a NUL byte in the route number)
+ * escaped as a bare 500 instead of the documented DATABASE_UNAVAILABLE.
  */
 export async function getRouteConnections(
+  mode: "BUS" | "METRO" | "FERRY" | "TRAM",
+  routeNo: string,
+): Promise<RouteConnections | null> {
+  requireDatabase();
+  return withDatabaseErrors(() => loadRouteConnections(mode, routeNo));
+}
+
+async function loadRouteConnections(
   mode: "BUS" | "METRO" | "FERRY" | "TRAM",
   routeNo: string,
 ): Promise<RouteConnections | null> {
